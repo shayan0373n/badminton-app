@@ -3,9 +3,17 @@ import os
 import pickle
 from session_logic import BadmintonSession
 
-STATE_FILE = "session_state.pkl"
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Badminton Setup")
+STATE_FILE = "session_state.pkl"
+
+# --- Helper Functions ---
+def save_state():
+    """Saves the entire session object to a file."""
+    if 'session' in st.session_state:
+        print("Saving session state to file...")
+        with open(STATE_FILE, "wb") as f:
+            pickle.dump(st.session_state.session, f)
 
 def add_player_callback():
     """Callback to add a new player to the session."""
@@ -32,69 +40,53 @@ if os.path.exists(STATE_FILE):
                 st.switch_page("pages/2_Session.py")
             except Exception as e:
                 st.error(f"Could not load session file: {e}")
-
     with col2:
         if st.button("🗑️ Start a New Session", type="primary", use_container_width=True):
-            # Clear the old state to start fresh
             os.remove(STATE_FILE)
             st.rerun()
-    # Stop rendering the rest of the setup page until a choice is made
     st.stop()
-st.header("Session Setup")
 
-# --- Player Management ---
+# --- Main Setup UI ---
+st.header("Session Setup")
 st.subheader("1. Manage Players")
 
-# Initialize the player list in the session state if it doesn't exist
 if 'player_list' not in st.session_state:
-    st.session_state.player_list = ["P" + str(i) for i in range(1, 11)]  # Default players
+    st.session_state.player_list = ["P" + str(i) for i in range(1, 11)]  # Default players P1 to P10
 
-# Add player input
 st.text_input("New Player Name", key="new_player_input", on_change=add_player_callback)
 st.button("Add Player", on_click=add_player_callback)
 
-# Display and manage the list of players
 st.subheader("Initial Player Ranking")
 for i, player_name in enumerate(st.session_state.player_list):
-    name_col, buttons_col = st.columns([1, 3], vertical_alignment="center", gap=None)
-    
+    name_col, buttons_col = st.columns([3, 1], vertical_alignment="center")
     with name_col:
-        st.markdown(f"**{i+1}. {player_name}**")
-    
+        st.text(f"{i+1}. {player_name}")
     with buttons_col:
-        up_col, down_col, del_col = st.columns(3, gap=None)
-        
+        up_col, down_col, del_col = st.columns(3, gap="small")
         with up_col:
-            # Disable 'Up' button for the first item
-            if st.button("🔼", key=f"up_{i}", use_container_width=False, disabled=(i==0)):
+            if st.button("🔼", key=f"up_{i}", use_container_width=True, disabled=(i==0)):
                 st.session_state.player_list.insert(i-1, st.session_state.player_list.pop(i))
                 st.rerun()
-
         with down_col:
-            # Disable 'Down' button for the last item
-            if st.button("🔽", key=f"down_{i}", use_container_width=False, disabled=(i==len(st.session_state.player_list)-1)):
+            if st.button("🔽", key=f"down_{i}", use_container_width=True, disabled=(i==len(st.session_state.player_list)-1)):
                 st.session_state.player_list.insert(i+1, st.session_state.player_list.pop(i))
                 st.rerun()
-
         with del_col:
-            if st.button("🗑️", key=f"del_{i}", use_container_width=False):
+            if st.button("🗑️", key=f"del_{i}", use_container_width=True):
                 st.session_state.player_list.pop(i)
                 st.rerun()
 
-# --- Session Start Logic ---
 st.subheader("2. Start Session")
 num_courts = st.number_input("Number of Courts Available", min_value=1, value=2, step=1)
 
 if st.button("🚀 Start New Session", type="primary"):
     player_ids = st.session_state.player_list
-    
     if len(player_ids) != len(set(player_ids)):
         st.error("Error: Duplicate names found in the player list.")
     elif player_ids:
         total_players = len(player_ids)
         players_on_court = num_courts * 4
         rests_per_round = total_players - players_on_court
-
         if rests_per_round < 0:
             st.error(f"Error: Not enough players ({total_players}) for {num_courts} courts.")
         else:
@@ -104,7 +96,10 @@ if st.button("🚀 Start New Session", type="primary"):
             )
             st.session_state.session.prepare_round()
             
-            # Switch to the session page
+            # --- FIX ---
+            # Save the state immediately after creating the first round
+            save_state()
+            
             st.switch_page("pages/2_Session.py")
     else:
         st.error("Please add players to the list before starting.")

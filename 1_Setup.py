@@ -1,7 +1,9 @@
 import streamlit as st
 import os
+import pickle
 from session_logic import BadmintonSession
 
+STATE_FILE = "session_state.pkl"
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Badminton Setup")
 
@@ -17,6 +19,27 @@ if 'session' in st.session_state:
     st.switch_page("pages/2_Session.py")
 
 st.title("🏸 Badminton Club Rotation")
+
+# --- Resume Session Logic ---
+if os.path.exists(STATE_FILE):
+    st.subheader("An unfinished session was found.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Resume Last Session", use_container_width=True):
+            try:
+                with open(STATE_FILE, "rb") as f:
+                    st.session_state.session = pickle.load(f)
+                st.switch_page("pages/2_Session.py")
+            except Exception as e:
+                st.error(f"Could not load session file: {e}")
+
+    with col2:
+        if st.button("🗑️ Start a New Session", type="primary", use_container_width=True):
+            # Clear the old state to start fresh
+            os.remove(STATE_FILE)
+            st.rerun()
+    # Stop rendering the rest of the setup page until a choice is made
+    st.stop()
 st.header("Session Setup")
 
 # --- Player Management ---
@@ -24,7 +47,7 @@ st.subheader("1. Manage Players")
 
 # Initialize the player list in the session state if it doesn't exist
 if 'player_list' not in st.session_state:
-    st.session_state.player_list = ["Shayan", "Tara"]
+    st.session_state.player_list = ["P" + str(i) for i in range(1, 11)]  # Default players
 
 # Add player input
 st.text_input("New Player Name", key="new_player_input", on_change=add_player_callback)
@@ -60,7 +83,7 @@ for i, player_name in enumerate(st.session_state.player_list):
 
 # --- Session Start Logic ---
 st.subheader("2. Start Session")
-num_courts = st.number_input("Number of Courts Available", min_value=1, value=4, step=1)
+num_courts = st.number_input("Number of Courts Available", min_value=1, value=2, step=1)
 
 if st.button("🚀 Start New Session", type="primary"):
     player_ids = st.session_state.player_list

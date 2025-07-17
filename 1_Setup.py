@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import pickle
+import pandas as pd  # Import pandas for the data editor
 from session_logic import BadmintonSession
 
 # --- App Configuration ---
@@ -11,16 +12,10 @@ STATE_FILE = "session_state.pkl"
 def save_state():
     """Saves the entire session object to a file."""
     if 'session' in st.session_state:
-        print("Saving session state to file...")
         with open(STATE_FILE, "wb") as f:
             pickle.dump(st.session_state.session, f)
 
-def add_player_callback():
-    """Callback to add a new player to the session."""
-    new_player = st.session_state.new_player_input.strip()
-    if new_player and new_player not in st.session_state.player_list:
-        st.session_state.player_list.append(new_player)
-        st.session_state.new_player_input = "" # Clear input field
+# 'add_player_callback' is no longer needed with st.data_editor
 
 # If a session is already running, switch to the session page automatically
 if 'session' in st.session_state:
@@ -47,37 +42,56 @@ if os.path.exists(STATE_FILE):
     st.stop()
 
 # --- Main Setup UI ---
+# --- Main Setup UI ---
 st.header("Session Setup")
 st.subheader("1. Manage Players")
+st.info("Add, edit, or remove players in the table, then click 'Confirm Player List'.")
 
-if 'player_list' not in st.session_state:
-    st.session_state.player_list = ["P" + str(i) for i in range(1, 11)]  # Default players P1 to P10
+# Initialize the editor's state ONCE
+if 'editor_df' not in st.session_state:
+    # Use default player list if nothing is in session state yet
+    if 'player_list' not in st.session_state:
+        st.session_state.player_list = ["P" + str(i) for i in range(1, 13)]
 
-st.text_input("New Player Name", key="new_player_input", on_change=add_player_callback)
-st.button("Add Player", on_click=add_player_callback)
+    # Create the initial DataFrame for the editor
+    player_ranks = range(1, len(st.session_state.player_list) + 1)
+    st.session_state.editor_df = pd.DataFrame({
+        "#": player_ranks,
+        "Player Name": st.session_state.player_list,
+    })
 
-st.subheader("Initial Player Ranking")
-for i, player_name in enumerate(st.session_state.player_list):
-    name_col, buttons_col = st.columns([3, 1], vertical_alignment="center")
-    with name_col:
-        st.text(f"{i+1}. {player_name}")
-    with buttons_col:
-        up_col, down_col, del_col = st.columns(3, gap="small")
-        with up_col:
-            if st.button("🔼", key=f"up_{i}", use_container_width=True, disabled=(i==0)):
-                st.session_state.player_list.insert(i-1, st.session_state.player_list.pop(i))
-                st.rerun()
-        with down_col:
-            if st.button("🔽", key=f"down_{i}", use_container_width=True, disabled=(i==len(st.session_state.player_list)-1)):
-                st.session_state.player_list.insert(i+1, st.session_state.player_list.pop(i))
-                st.rerun()
-        with del_col:
-            if st.button("🗑️", key=f"del_{i}", use_container_width=True):
-                st.session_state.player_list.pop(i)
-                st.rerun()
+# --- Display the data editor ---
+# The editor's state is now persistent in st.session_state.editor_df
+edited_df = st.data_editor(
+    st.session_state.editor_df,
+    disabled=["#"],
+    hide_index=True,
+    num_rows="dynamic",
+    use_container_width=True
+)
 
+# --- Add a button to commit the changes ---
+if st.button("✅ Confirm Player List"):
+    # The 'edited_df' variable now reliably contains the user's changes
+    final_players = edited_df["Player Name"].dropna().tolist()
+    
+    # Update the master player list and the editor's DataFrame
+    st.session_state.player_list = final_players
+    
+    # Re-create the editor's DataFrame to update the '#' column correctly
+    player_ranks = range(1, len(final_players) + 1)
+    st.session_state.editor_df = pd.DataFrame({
+        "#": player_ranks,
+        "Player Name": final_players,
+    })
+    
+    st.success("Player list saved!")
+    # Rerun to show the refreshed and saved table immediately
+    st.rerun()
+
+# --- Session Start Logic ---
 st.subheader("2. Start Session")
-num_courts = st.number_input("Number of Courts Available", min_value=1, value=2, step=1)
+num_courts = st.number_input("Number of Courts Available", min_value=1, value=4, step=1)
 
 if st.button("🚀 Start New Session", type="primary"):
     player_ids = st.session_state.player_list
@@ -95,11 +109,7 @@ if st.button("🚀 Start New Session", type="primary"):
                 rests_per_round=rests_per_round
             )
             st.session_state.session.prepare_round()
-            
-            # --- FIX ---
-            # Save the state immediately after creating the first round
             save_state()
-            
             st.switch_page("pages/2_Session.py")
     else:
         st.error("Please add players to the list before starting.")

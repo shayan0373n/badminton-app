@@ -4,6 +4,11 @@ import pickle
 import pandas as pd  # Import pandas for the data editor
 from session_logic import BadmintonSession
 
+# --- Constants ---
+DEFAULT_PLAYERS = ["P" + str(i) for i in range(1, 11)]
+DEFAULT_NUM_COURTS = 2
+PLAYERS_PER_COURT = 4
+
 # --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Badminton Setup")
 STATE_FILE = "session_state.pkl"
@@ -15,7 +20,33 @@ def save_state():
         with open(STATE_FILE, "wb") as f:
             pickle.dump(st.session_state.session, f)
 
-# 'add_player_callback' is no longer needed with st.data_editor
+def validate_session_setup(player_ids, num_courts):
+    """Validates player list and court count. Returns (is_valid, error_message)."""
+    if len(player_ids) != len(set(player_ids)):
+        return False, "Error: Duplicate names found in the player list."
+    elif not player_ids:
+        return False, "Please add players to the list before starting."
+    else:
+        total_players = len(player_ids)
+        players_on_court = num_courts * PLAYERS_PER_COURT
+        rests_per_round = total_players - players_on_court
+        if rests_per_round < 0:
+            return False, f"Error: Not enough players ({total_players}) for {num_courts} courts."
+        return True, None
+
+def start_session(player_ids, num_courts):
+    """Creates and starts a new badminton session."""
+    total_players = len(player_ids)
+    players_on_court = num_courts * PLAYERS_PER_COURT
+    rests_per_round = total_players - players_on_court
+    
+    st.session_state.session = BadmintonSession(
+        player_ids=player_ids, 
+        rests_per_round=rests_per_round
+    )
+    st.session_state.session.prepare_round()
+    save_state()
+    st.switch_page("pages/2_Session.py")
 
 # If a session is already running, switch to the session page automatically
 if 'session' in st.session_state:
@@ -42,7 +73,6 @@ if os.path.exists(STATE_FILE):
     st.stop()
 
 # --- Main Setup UI ---
-# --- Main Setup UI ---
 st.header("Session Setup")
 st.subheader("1. Manage Players")
 st.info("Add, edit, or remove players in the table, then click 'Confirm Player List'.")
@@ -51,7 +81,7 @@ st.info("Add, edit, or remove players in the table, then click 'Confirm Player L
 if 'editor_df' not in st.session_state:
     # Use default player list if nothing is in session state yet
     if 'player_list' not in st.session_state:
-        st.session_state.player_list = ["P" + str(i) for i in range(1, 13)]
+        st.session_state.player_list = DEFAULT_PLAYERS.copy()
 
     # Create the initial DataFrame for the editor
     player_ranks = range(1, len(st.session_state.player_list) + 1)
@@ -72,6 +102,9 @@ edited_df = st.data_editor(
 
 # --- Add a button to commit the changes ---
 if st.button("✅ Confirm Player List"):
+    # First, update the session state with the current editor changes
+    st.session_state.editor_df = edited_df
+    
     # The 'edited_df' variable now reliably contains the user's changes
     final_players = edited_df["Player Name"].dropna().tolist()
     
@@ -85,31 +118,56 @@ if st.button("✅ Confirm Player List"):
         "Player Name": final_players,
     })
     
-    st.success("Player list saved!")
+    # Set a flag to show success message after rerun
+    st.session_state.show_success = True
     # Rerun to show the refreshed and saved table immediately
     st.rerun()
 
+# Show success message if flag is set
+if st.session_state.get('show_success', False):
+    st.success("Player list saved!")
+    # Clear the flag so message doesn't persist
+    st.session_state.show_success = False
+
 # --- Session Start Logic ---
 st.subheader("2. Start Session")
-num_courts = st.number_input("Number of Courts Available", min_value=1, value=4, step=1)
+
+# Initialize persistent number of courts (survives session resets)
+if 'num_courts_persistent' not in st.session_state:
+    st.session_state.num_courts_persistent = DEFAULT_NUM_COURTS
+
+# Initialize the widget key if it doesn't exist or restore from persistent value
+if 'num_courts_input' not in st.session_state:
+    st.session_state.num_courts_input = st.session_state.num_courts_persistent
+
+num_courts = st.number_input(
+    "Number of Courts Available", 
+    min_value=1, 
+    step=1,
+    key="num_courts_input"
+)
+
+# Keep the persistent value in sync with the widget
+st.session_state.num_courts_persistent = num_courts
 
 if st.button("🚀 Start New Session", type="primary"):
-    player_ids = st.session_state.player_list
-    if len(player_ids) != len(set(player_ids)):
-        st.error("Error: Duplicate names found in the player list.")
-    elif player_ids:
-        total_players = len(player_ids)
-        players_on_court = num_courts * 4
-        rests_per_round = total_players - players_on_court
-        if rests_per_round < 0:
-            st.error(f"Error: Not enough players ({total_players}) for {num_courts} courts.")
+    # Ensure player_list exists - if not, use the current editor data
+    if 'player_list' not in st.session_state:
+        if 'editor_df' in st.session_state:
+            # Get player list from current editor state
+            st.session_state.player_list = st.session_state.editor_df["Player Name"].dropna().tolist()
         else:
-            st.session_state.session = BadmintonSession(
-                player_ids=player_ids, 
-                rests_per_round=rests_per_round
-            )
-            st.session_state.session.prepare_round()
-            save_state()
-            st.switch_page("pages/2_Session.py")
+            # Fall back to default
+            st.session_state.player_list = DEFAULT_PLAYERS.copy()
+    
+    player_ids = st.session_state.player_list
+    
+    # Validate first
+    is_valid, error_message = validate_session_setup(player_ids, num_courts)
+    
+    if is_valid:
+        # If validation passes, start the session
+        start_session(player_ids, num_courts)
     else:
-        st.error("Please add players to the list before starting.")
+        # If validation fails, show error
+        st.error(error_message)

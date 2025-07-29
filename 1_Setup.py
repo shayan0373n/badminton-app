@@ -1,52 +1,14 @@
 import streamlit as st
-import os
-import pickle
-import pandas as pd  # Import pandas for the data editor
-from session_logic import BadmintonSession
+import pandas as pd
+from utils import validate_session_setup, start_session
+from session_logic import SessionManager, ClubNightSession
 
 # --- Constants ---
 DEFAULT_PLAYERS = ["P" + str(i) for i in range(1, 11)]
 DEFAULT_NUM_COURTS = 2
-PLAYERS_PER_COURT = 4
+DEFAULT_WEIGHTS = {'skill': 5, 'power': 2, 'pairing': 1}
 
-# --- App Configuration ---
 st.set_page_config(layout="wide", page_title="Badminton Setup")
-STATE_FILE = "session_state.pkl"
-
-# --- Helper Functions ---
-def save_state():
-    """Saves the entire session object to a file."""
-    if 'session' in st.session_state:
-        with open(STATE_FILE, "wb") as f:
-            pickle.dump(st.session_state.session, f)
-
-def validate_session_setup(player_ids, num_courts):
-    """Validates player list and court count. Returns (is_valid, error_message)."""
-    if len(player_ids) != len(set(player_ids)):
-        return False, "Error: Duplicate names found in the player list."
-    elif not player_ids:
-        return False, "Please add players to the list before starting."
-    else:
-        total_players = len(player_ids)
-        players_on_court = num_courts * PLAYERS_PER_COURT
-        rests_per_round = total_players - players_on_court
-        if rests_per_round < 0:
-            return False, f"Error: Not enough players ({total_players}) for {num_courts} courts."
-        return True, None
-
-def start_session(player_ids, num_courts):
-    """Creates and starts a new badminton session."""
-    total_players = len(player_ids)
-    players_on_court = num_courts * PLAYERS_PER_COURT
-    rests_per_round = total_players - players_on_court
-    
-    st.session_state.session = BadmintonSession(
-        player_ids=player_ids, 
-        rests_per_round=rests_per_round
-    )
-    st.session_state.session.prepare_round()
-    save_state()
-    st.switch_page("pages/2_Session.py")
 
 # If a session is already running, switch to the session page automatically
 if 'session' in st.session_state:
@@ -55,20 +17,17 @@ if 'session' in st.session_state:
 st.title("🏸 Badminton Club Rotation")
 
 # --- Resume Session Logic ---
-if os.path.exists(STATE_FILE):
+session = SessionManager.load()
+if session:
     st.subheader("An unfinished session was found.")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("✅ Resume Last Session", use_container_width=True):
-            try:
-                with open(STATE_FILE, "rb") as f:
-                    st.session_state.session = pickle.load(f)
-                st.switch_page("pages/2_Session.py")
-            except Exception as e:
-                st.error(f"Could not load session file: {e}")
+            st.session_state.session = session
+            st.switch_page("pages/2_Session.py")
     with col2:
         if st.button("🗑️ Start a New Session", type="primary", use_container_width=True):
-            os.remove(STATE_FILE)
+            SessionManager.clear()
             st.rerun()
     st.stop()
 
@@ -132,6 +91,18 @@ if st.session_state.get('show_success', False):
 # --- Session Start Logic ---
 st.subheader("2. Start Session")
 
+with st.sidebar:
+    st.header("Optimizer Weights")
+    st.info("Adjust the importance of different factors for creating matches.")
+    
+    if 'weights' not in st.session_state:
+        st.session_state.weights = DEFAULT_WEIGHTS.copy()
+
+    weights = st.session_state.weights
+    weights['skill'] = st.number_input("Skill Balance", min_value=1, value=weights['skill'], step=1)
+    weights['power'] = st.number_input("Power Balance", min_value=1, value=weights['power'], step=1)
+    weights['pairing'] = st.number_input("Pairing History", min_value=1, value=weights['pairing'], step=1)
+
 # Initialize persistent number of courts (survives session resets)
 if 'num_courts_persistent' not in st.session_state:
     st.session_state.num_courts_persistent = DEFAULT_NUM_COURTS
@@ -167,7 +138,7 @@ if st.button("🚀 Start New Session", type="primary"):
     
     if is_valid:
         # If validation passes, start the session
-        start_session(player_ids, num_courts)
+        start_session(player_ids, num_courts, st.session_state.weights)
     else:
         # If validation fails, show error
         st.error(error_message)

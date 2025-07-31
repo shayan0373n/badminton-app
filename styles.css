@@ -1,0 +1,17 @@
+div[data-testid="stButtonGroup"] button {
+    border: 2px solid #555;
+}
+        
+div[data-testid="stButtonGroup"] p {
+    font-size: 1.5em !important;
+    font-weight: bold !important;
+}
+        
+div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] {
+    background-color: #d4edda; /* Light green background */
+    border-color: #c3e6cb;
+}
+
+div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p {
+    color: #155724 !important; /* Dark green text */
+}

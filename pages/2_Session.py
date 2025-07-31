@@ -57,24 +57,26 @@ with col1:
                 st.warning("Cannot process results as no courts were available.")
 
 with col2:
-    st.header("Current Standings")
-    standings = session.get_standings()
-    st.dataframe(standings,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "_index": "Rank",
-                        "0": "Player",
-                        "1": "Score"
-                    })
+    st.header("Current Standings (Earned Ratings)")
+    standings_data = session.get_standings()
+    
+    # Create a DataFrame for better display control
+    import pandas as pd
+    if standings_data:
+        df_standings = pd.DataFrame(standings_data, columns=["Player", "Earned Score"])
+        df_standings.index += 1  # Start rank from 1
+    else:
+        df_standings = pd.DataFrame(columns=["Player", "Earned Score"])
+
+    st.dataframe(df_standings, use_container_width=True)
 
 # --- Session Management in Sidebar ---
 with st.sidebar:
     st.header("Manage Session")
     if st.button("⚠️ Terminate Session"):
-        # Preserve the player list for the next session
+        # Preserve the player table for the next session
         if 'session' in st.session_state:
-            st.session_state.player_list = st.session_state.session.player_names
+            st.session_state.player_table = st.session_state.session.player_pool
         
         SessionManager.clear()  # Clear the session state file
         

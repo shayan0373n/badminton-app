@@ -8,18 +8,20 @@ from collections import defaultdict
 # so this script can be run as a standalone file.
 # ============================================================================
 def generate_one_round(
-    player_ratings,
+    players,
     players_to_rest,
     num_courts,
     historical_partners,
+    ff_power_penalty=0,
     players_per_court=4,
     weights=None
 ):
     """
     Generates a single, optimized round of badminton matches.
     """
-    print(historical_partners)
-    print(weights)
+    player_ratings = {p.name: p.rating for p in players}
+    player_genders = {p.name: p.gender for p in players}
+
     if weights is None:
         weights = {'skill': 1.0, 'power': 1.0, 'pairing': 1.0}
 
@@ -46,7 +48,7 @@ def generate_one_round(
     total_skill_objective = pulp.lpSum(max_rating_on_court[c] - min_rating_on_court[c] for c in range(num_courts))
 
     max_team_power = pulp.LpVariable.dicts("MaxTeamPower", range(num_courts), lowBound=0)
-    min_team_power = pulp.LpVariable.dicts("MinTeamPower", range(num_courts), lowBound=0)
+    min_team_power = pulp.LpVariable.dicts("MinTeamPower", range(num_courts), lowBound=min(ff_power_penalty, 0))
     total_power_objective = pulp.lpSum(max_team_power[c] - min_team_power[c] for c in range(num_courts))
 
     total_pairing_objective = pulp.lpSum(
@@ -55,9 +57,9 @@ def generate_one_round(
     )
 
     prob += (
-        weights['skill'] * total_skill_objective +
-        weights['power'] * total_power_objective +
-        weights['pairing'] * total_pairing_objective
+        weights.get('skill', 1.0) * total_skill_objective +
+        weights.get('power', 1.0) * total_power_objective +
+        weights.get('pairing', 1.0) * total_pairing_objective
     ), "Minimize_Weighted_Objectives"
 
     for c in range(num_courts):
@@ -84,6 +86,9 @@ def generate_one_round(
 
         for p1, p2 in player_pairs:
             pair_power = player_ratings[p1] + player_ratings[p2]
+            # Apply penalty if both players are female
+            if player_genders[p1] == 'F' and player_genders[p2] == 'F':
+                pair_power += ff_power_penalty
             prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 
@@ -92,6 +97,17 @@ def generate_one_round(
     if prob.status != pulp.LpStatusOptimal:
         print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")
         return None, historical_partners
+    
+    ## DEBUG ##
+    print("Max Rating on Court:", {c: max_rating_on_court[c].value() for c in range(num_courts)})
+    print("Min Rating on Court:", {c: min_rating_on_court[c].value() for c in range(num_courts)})
+    print("Max Team Power:", {c: max_team_power[c].value() for c in range(num_courts)})
+    print("Min Team Power:", {c: min_team_power[c].value() for c in range(num_courts)})
+    print("Total Skill Objective:", pulp.value(total_skill_objective))
+    print("Total Power Objective:", pulp.value(total_power_objective))
+    print("Total Pairing Objective:", pulp.value(total_pairing_objective))
+    print("Objective Value:", pulp.value(prob.objective))
+    ## END DEBUG ##
     
     matches = []
     updated_historical_partners = historical_partners.copy()

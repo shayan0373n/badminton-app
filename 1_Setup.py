@@ -4,7 +4,7 @@ try:
     # Check if running on Streamlit Cloud and secrets are set
     if "GUROBI_LICENSE_CONTENT" in st.secrets:
         # Write the license content from secrets to the file
-        with open('~/gurobi.lic', "w") as f:
+        with open('/opt/gurobi/gurobi.lic', "w") as f:
             f.write(st.secrets["GUROBI_LICENSE_CONTENT"])
 
         st.success("✅ Gurobi license configured from secrets.")

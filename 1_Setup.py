@@ -64,15 +64,19 @@ if session:
     st.stop()
 
 # --- Main Setup UI ---
-wls_access_id = os.getenv("GRB_WLSACCESSID")
-wls_secret = os.getenv("GRB_WLSSECRET")
-license_id = os.getenv("GRB_LICENSEID")
-
-# Check if credentials are loaded
-if not all([wls_access_id, wls_secret, license_id]):
-    st.error("Gurobi WLS credentials not found in environment variables.")
-else:
+try:
+    if st.secrets:
+        # Load Gurobi WLS credentials from secrets
+        wls_access_id = st.secrets["GRB_WLSACCESSID"]
+        wls_secret = st.secrets["GRB_WLSSECRET"]
+        license_id = st.secrets["GRB_LICENSEID"]
+    os.environ["GRB_WLSACCESSID"] = wls_access_id
+    os.environ["GRB_WLSSECRET"] = wls_secret
+    os.environ["GRB_LICENSEID"] = license_id
     st.success("Gurobi WLS credentials loaded successfully.")
+except Exception as e:
+    st.error("Gurobi WLS credentials not found in environment variables.")
+    print(f"Error loading Gurobi WLS credentials: {e}")
 
 st.header("Session Setup")
 st.subheader("1. Manage Players")

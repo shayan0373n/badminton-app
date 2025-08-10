@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
-from utils import Player, PreRating
-from session_logic import ClubNightSession, SessionManager
+from session_logic import ClubNightSession, SessionManager, Player
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
-    "P" + str(i): Player(name="P" + str(i), gender="M", pre_rating=PreRating.INTERMEDIATE)
+    "P" + str(i): Player(name="P" + str(i), gender="M", pre_rating=2)
     for i in range(1, 11)
 }
 
@@ -66,7 +65,52 @@ if session:
 # --- Main Setup UI ---
 st.header("Session Setup")
 st.subheader("1. Manage Players")
-st.info("Add, edit, or remove players in the table, then click 'Confirm Player List'.")
+st.info("Add, edit, or remove players in the table, or upload a CSV file.")
+
+# --- CSV Upload Logic ---
+uploaded_file = st.file_uploader("Upload Players CSV", type=['csv'])
+if uploaded_file is not None:
+    try:
+        # Read the uploaded CSV file
+        new_players_df = pd.read_csv(uploaded_file)
+
+        # --- Validation ---
+        required_columns = ["Player Name", "Gender", "Pre-Rating"]
+        if not all(col in new_players_df.columns for col in required_columns):
+            st.error(f"CSV must contain the following columns: {', '.join(required_columns)}")
+        else:
+            # Drop rows with missing names
+            new_players_df.dropna(subset=["Player Name"], inplace=True)
+
+            # --- Data Processing ---
+            # Ensure Pre-Rating is numeric
+            new_players_df["Pre-Rating"] = pd.to_numeric(new_players_df["Pre-Rating"], errors='coerce').fillna(0).astype(int)
+            # Create the player table from the CSV data
+            player_table = {
+                row["Player Name"]: Player(
+                    name=row["Player Name"],
+                    gender=row["Gender"],
+                    pre_rating=row["Pre-Rating"]
+                )
+                for _, row in new_players_df.iterrows()
+            }
+
+            # Update the session state
+            st.session_state.player_table = player_table
+
+            # Re-create the DataFrame for the editor to reflect the loaded data
+            player_ranks = range(1, len(player_table) + 1)
+            st.session_state.editor_df = pd.DataFrame({
+                "#": player_ranks,
+                "Player Name": [p.name for p in player_table.values()],
+                "Gender": [p.gender for p in player_table.values()],
+                "Pre-Rating": [p.pre_rating for p in player_table.values()],
+            })
+            
+            st.success("Successfully loaded players from CSV!")
+
+    except Exception as e:
+        st.error(f"An error occurred while processing the CSV: {e}")
 
 # Initialize the editor's state ONCE
 if 'editor_df' not in st.session_state:
@@ -81,7 +125,7 @@ if 'editor_df' not in st.session_state:
         "#": player_ranks,
         "Player Name": [p.name for p in player_table.values()],
         "Gender": [p.gender for p in player_table.values()],
-        "Pre-Rating": [p.pre_rating.value for p in player_table.values()],
+        "Pre-Rating": [p.pre_rating for p in player_table.values()],
     })
 
 # --- Display the data editor ---
@@ -95,10 +139,11 @@ edited_df = st.data_editor(
             options=["M", "F"],
             required=True,
         ),
-        "Pre-Rating": st.column_config.SelectboxColumn(
+        "Pre-Rating": st.column_config.NumberColumn(
             "Pre-Rating",
-            help="Player's pre-defined rating",
-            options=[r.value for r in PreRating],
+            help="Player's numerical rating (e.g., 1, 2, 4)",
+            min_value=0,
+            step=1,
             required=True,
         ),
     },
@@ -116,11 +161,14 @@ if st.button("✅ Confirm Player List"):
     # The 'edited_df' variable now reliably contains the user's changes
     edited_df.dropna(subset=["Player Name"], inplace=True)
     
+    # Ensure Pre-Rating is numeric
+    edited_df["Pre-Rating"] = pd.to_numeric(edited_df["Pre-Rating"], errors='coerce').fillna(0).astype(int)
+    
     final_players_table = {
         row["Player Name"]: Player(
             name=row["Player Name"],
             gender=row["Gender"],
-            pre_rating=PreRating(row["Pre-Rating"])
+            pre_rating=row["Pre-Rating"]
         )
         for _, row in edited_df.iterrows()
     }
@@ -134,14 +182,12 @@ if st.button("✅ Confirm Player List"):
         "#": player_ranks,
         "Player Name": [p.name for p in final_players_table.values()],
         "Gender": [p.gender for p in final_players_table.values()],
-        "Pre-Rating": [p.pre_rating.value for p in final_players_table.values()],
+        "Pre-Rating": [p.pre_rating for p in final_players_table.values()],
     })
     
     # Set a flag to show success message after rerun
     st.session_state.show_success = True
-    # Rerun to show the refreshed and saved table immediately
-    st.rerun()
-
+    
 # Show success message if flag is set
 if st.session_state.get('show_success', False):
     st.success("Player list saved!")

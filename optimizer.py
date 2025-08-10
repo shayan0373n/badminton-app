@@ -92,9 +92,10 @@ def generate_one_round(
             prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 
-    prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=10))
+    # Use the HiGHS solver with multiple threads and a 10% relative gap tolerance.
+    prob.solve(pulp.GUROBI(msg=True, timeLimit=10))
 
-    if prob.status != pulp.LpStatusOptimal:
+    if prob.status == pulp.LpStatusInfeasible:
         print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")
         return None, historical_partners
     

@@ -3,9 +3,31 @@ import os
 import pickle
 import random
 from collections import defaultdict
+from dataclasses import dataclass, field
 from optimizer import generate_one_round
 
 STATE_FILE = "session_state.pkl"
+
+@dataclass
+class Player:
+    name: str
+    gender: str
+    pre_rating: int
+    rating: int = field(init=False)
+    earned_rating: int = 0
+
+    def __post_init__(self):
+        self.rating = self.pre_rating
+
+    def get_initial_rating(self):
+        # This method can be simplified or removed if rating is set in post_init
+        return self.pre_rating
+
+    def add_rating(self, amount: int):
+        """Adds rating to the player."""
+        self.rating += amount
+        self.earned_rating += amount
+
 
 class SessionManager:
     """Handles loading, saving, and clearing the session state from a file."""

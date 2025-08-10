@@ -1,17 +1,39 @@
 import streamlit as st
 from pathlib import Path
-try:
-    # Check if running on Streamlit Cloud and secrets are set
-    if "GUROBI_LICENSE_CONTENT" in st.secrets:
-        home_dir = Path.home()
-        licence_path = home_dir / "gurobi.lic"
-        # Write the license content from secrets to the file
-        with open(licence_path, "w") as f:
-            f.write(st.secrets["GUROBI_LICENSE_CONTENT"])
+import os
+st.subheader("🕵️‍♂️ Gurobi License File Scan Results:")
 
-        st.success("✅ Gurobi license configured from secrets.")
-except Exception as e:
-    st.error(f"Failed to configure Gurobi license: {e}")
+# Define all the paths Gurobi might check on a Linux system
+paths_to_check = [
+    Path.home(),                 # User's home directory (e.g., /home/adminuser)
+    Path.cwd(),                  # Current working directory
+    Path("/opt/gurobi/"),        # Common system-wide location
+    Path("/usr/lib/gurobi/"),      # Another possible system location
+]
+
+# Also check the path from the environment variable, if it's set
+env_path_str = os.environ.get("GRB_LICENSE_FILE")
+if env_path_str:
+    st.write(f"**`GRB_LICENSE_FILE` is set to:** `{env_path_str}`")
+    # Don't add it to paths_to_check, Gurobi will use it directly.
+else:
+    st.write("**`GRB_LICENSE_FILE` is not set.** Gurobi will scan default paths:")
+
+# Scan the default paths
+found_files = []
+for directory in paths_to_check:
+    license_file = directory / "gurobi.lic"
+    if license_file.is_file():
+        status = "✅ **FOUND**"
+        found_files.append(str(license_file))
+    else:
+        status = "❌ NOT FOUND"
+    st.code(f"Checking: {str(license_file):<45} {status}")
+
+if found_files:
+    st.warning(f"Found conflicting license file(s) at: {', '.join(found_files)}")
+else:
+    st.info("No conflicting license files found in standard default locations.")
 
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player

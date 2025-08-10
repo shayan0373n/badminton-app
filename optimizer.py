@@ -96,8 +96,8 @@ def generate_one_round(
             prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 
-    # Use the Gurobi solver with multiple threads and a 10% relative gap tolerance.
-    prob.solve(pulp.GUROBI(msg=False, timeLimit=10, threads=None))
+    # Use the Gurobi solver with a 10s time limit.
+    prob.solve(pulp.GUROBI(msg=False, timeLimit=10))
 
     if prob.status == pulp.LpStatusInfeasible:
         print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")

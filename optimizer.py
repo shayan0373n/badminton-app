@@ -2,6 +2,10 @@
 import pulp
 from itertools import combinations
 from collections import defaultdict
+from utils import setup_gurobi_license
+
+# Set up the Gurobi license
+setup_gurobi_license()
 
 # ============================================================================
 # This is the core function from our previous work. It is included here
@@ -92,8 +96,8 @@ def generate_one_round(
             prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 
-    # Use the HiGHS solver with multiple threads and a 10% relative gap tolerance.
-    prob.solve(pulp.GUROBI(msg=True, timeLimit=10))
+    # Use the Gurobi solver with multiple threads and a 10% relative gap tolerance.
+    prob.solve(pulp.GUROBI_CMD(msg=False, timeLimit=30, gapRel=0.1, threads=None))
 
     if prob.status == pulp.LpStatusInfeasible:
         print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")

@@ -1,19 +1,12 @@
+import os
 import streamlit as st
-from pathlib import Path
-try:
-    # Check if running on Streamlit Cloud and secrets are set
-    if "GUROBI_LICENSE_CONTENT" in st.secrets:
-        home_dir = Path.home()
-        licence_path = home_dir / "gurobi.lic"
-        # Write the license content from secrets to the file
-        with open(licence_path, "w") as f:
-            lic_content = st.secrets["GUROBI_LICENSE_CONTENT"]
-            st.text(lic_content)
-            f.write(lic_content)
 
-        st.success("✅ Gurobi license configured from secrets.")
-except Exception as e:
-    st.error(f"Failed to configure Gurobi license: {e}")
+if 'GUROBI_LIC' in st.secrets:
+    lic_path = "/tmp/gurobi.lic"  # writable location on Streamlit Cloud
+    with open(lic_path, "w") as f:
+        f.write(st.secrets["GUROBI_LIC"])
+
+    os.environ["GRB_LICENSE_FILE"] = lic_path
 
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player

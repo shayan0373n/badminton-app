@@ -3,20 +3,14 @@ import os
 try:
     # Check if running on Streamlit Cloud and secrets are set
     if "GUROBI_LICENSE_CONTENT" in st.secrets:
-        # Define the path for the license file inside the container
-        license_filepath = "/tmp/gurobi.lic"
-
         # Write the license content from secrets to the file
-        with open(license_filepath, "w") as f:
+        with open('~/gurobi.lic', "w") as f:
             f.write(st.secrets["GUROBI_LICENSE_CONTENT"])
-
-        # Set the Gurobi environment variable to point to the license file
-        os.environ["GRB_LICENSE_FILE"] = license_filepath
 
         st.success("✅ Gurobi license configured from secrets.")
 except Exception as e:
     st.error(f"Failed to configure Gurobi license: {e}")
-    
+
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT

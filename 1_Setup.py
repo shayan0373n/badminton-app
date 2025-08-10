@@ -16,7 +16,17 @@ except KeyError as e:
     st.error(f"A required Gurobi secret is missing: {e}. Please check your Streamlit Cloud secrets.")
 except Exception as e:
     st.error(f"An unexpected error occurred while loading credentials: {e}")
+import gurobipy
 
+try:
+    # This line will force Gurobi to perform its full license check.
+    with gurobipy.Env(empty=True) as env:
+        env.start()
+    st.info("✅ Gurobi environment check passed.")
+except gurobipy.GurobiError as e:
+    st.error("❌ GUROBI LICENSE ERROR:")
+    st.error(e)
+    st.stop() # Stop the app here to prevent further errors.
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT

@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT
+import os
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -63,6 +64,16 @@ if session:
     st.stop()
 
 # --- Main Setup UI ---
+wls_access_id = os.getenv("GRB_WLSACCESSID")
+wls_secret = os.getenv("GRB_WLSSECRET")
+license_id = os.getenv("GRB_LICENSEID")
+
+# Check if credentials are loaded
+if not all([wls_access_id, wls_secret, license_id]):
+    st.error("Gurobi WLS credentials not found in environment variables.")
+else:
+    st.success("Gurobi WLS credentials loaded successfully.")
+
 st.header("Session Setup")
 st.subheader("1. Manage Players")
 st.info("Add, edit, or remove players in the table, or upload a CSV file.")

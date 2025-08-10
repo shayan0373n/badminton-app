@@ -1,11 +1,6 @@
 # optimizer.py
 import pulp
 from itertools import combinations
-from collections import defaultdict
-from utils import setup_gurobi_license
-
-# Set up the Gurobi license
-setup_gurobi_license()
 
 # ============================================================================
 # This is the core function from our previous work. It is included here
@@ -97,7 +92,14 @@ def generate_one_round(
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 
     # Use the Gurobi solver with a 10s time limit.
-    prob.solve(pulp.GUROBI(msg=False, timeLimit=10))
+    solver = pulp.GUROBI(
+        # WLSACCESSID="109e7e53-b4d3-460f-8dbc-1c746049f8d3",
+        # WLSSECRET="8e667d81-d865-4d1e-bd95-2f5f93c2705c",
+        # LICENSEID="2694680",
+        msg=False,
+        timeLimit=10
+    )
+    prob.solve(solver)
 
     if prob.status == pulp.LpStatusInfeasible:
         print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")

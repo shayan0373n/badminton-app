@@ -1,8 +1,25 @@
 import streamlit as st
+import os
+
+try:
+    # This whole block should run before anything else
+    if st.secrets:
+        os.environ["GRB_WLSACCESSID"] = st.secrets["GRB_WLSACCESSID"]
+        os.environ["GRB_WLSSECRET"] = st.secrets["GRB_WLSSECRET"]
+        os.environ["GRB_LICENSEID"] = st.secrets["GRB_LICENSEID"]
+        st.success("Gurobi WLS credentials loaded successfully.")
+    else:
+        # Handle the case for local development if secrets aren't set
+        st.info("Running locally. Gurobi may be in limited mode without a local license file.")
+
+except KeyError as e:
+    st.error(f"A required Gurobi secret is missing: {e}. Please check your Streamlit Cloud secrets.")
+except Exception as e:
+    st.error(f"An unexpected error occurred while loading credentials: {e}")
+
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT
-import os
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -64,20 +81,6 @@ if session:
     st.stop()
 
 # --- Main Setup UI ---
-try:
-    if st.secrets:
-        # Load Gurobi WLS credentials from secrets
-        wls_access_id = st.secrets["GRB_WLSACCESSID"]
-        wls_secret = st.secrets["GRB_WLSSECRET"]
-        license_id = st.secrets["GRB_LICENSEID"]
-    os.environ["GRB_WLSACCESSID"] = wls_access_id
-    os.environ["GRB_WLSSECRET"] = wls_secret
-    os.environ["GRB_LICENSEID"] = license_id
-    st.success("Gurobi WLS credentials loaded successfully.")
-except Exception as e:
-    st.error("Gurobi WLS credentials not found in environment variables.")
-    st.error(f"Error loading Gurobi WLS credentials: {e}")
-
 st.header("Session Setup")
 st.subheader("1. Manage Players")
 st.info("Add, edit, or remove players in the table, or upload a CSV file.")

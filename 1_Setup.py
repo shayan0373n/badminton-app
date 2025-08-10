@@ -76,7 +76,7 @@ try:
     st.success("Gurobi WLS credentials loaded successfully.")
 except Exception as e:
     st.error("Gurobi WLS credentials not found in environment variables.")
-    print(f"Error loading Gurobi WLS credentials: {e}")
+    st.error(f"Error loading Gurobi WLS credentials: {e}")
 
 st.header("Session Setup")
 st.subheader("1. Manage Players")

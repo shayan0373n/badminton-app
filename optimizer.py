@@ -1,5 +1,6 @@
 # optimizer.py
 import pulp
+import random
 from itertools import combinations
 
 # ============================================================================
@@ -24,9 +25,10 @@ def generate_one_round(
     if weights is None:
         weights = {'skill': 1.0, 'power': 1.0, 'pairing': 1.0}
 
-    all_players = sorted(list(player_ratings.keys()))
-    available_players = sorted([p for p in all_players if p not in players_to_rest])
-    
+    all_players = list(player_ratings.keys())
+    available_players = [p for p in all_players if p not in players_to_rest]
+    random.shuffle(available_players)
+        
     num_available = len(available_players)
     players_needed = num_courts * players_per_court
 
@@ -39,7 +41,7 @@ def generate_one_round(
     # x: Binary variable indicating if a player is on a court
     x = pulp.LpVariable.dicts("OnCourt", (available_players, range(num_courts)), cat='Binary')
     # t: Binary variable indicating if a pair of players are partners on a court
-    player_pairs = list(combinations(available_players, 2))
+    player_pairs = list(combinations(sorted(available_players), 2))
     t = pulp.LpVariable.dicts("Partners", (player_pairs, range(num_courts)), cat='Binary')
 
     max_rating_on_court = pulp.LpVariable.dicts("MaxRatingOnCourt", range(num_courts), lowBound=0)

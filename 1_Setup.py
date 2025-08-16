@@ -1,12 +1,19 @@
 import os
+import tempfile
 import streamlit as st
 
-if 'GUROBI_LIC' in st.secrets:
-    lic_path = "/tmp/gurobi.lic"  # writable location on Streamlit Cloud
-    with open(lic_path, "w") as f:
-        f.write(st.secrets["GUROBI_LIC"])
+if st.secrets.get("GUROBI_LIC"):
+    # Define a fixed path for the license file in the system's temp directory
+    temp_dir = tempfile.gettempdir()
+    license_path = os.path.join(temp_dir, "gurobi.lic")
 
-    os.environ["GRB_LICENSE_FILE"] = lic_path
+    # Write the license file only if it doesn't already exist
+    if not os.path.exists(license_path):
+        with open(license_path, "w") as f:
+            f.write(st.secrets["GUROBI_LIC"])
+    
+    # Set the environment variable to point to the license file
+    os.environ["GRB_LICENSE_FILE"] = license_path
 
 import pandas as pd
 from session_logic import ClubNightSession, SessionManager, Player

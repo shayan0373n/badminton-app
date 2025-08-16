@@ -15,3 +15,9 @@ div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] {
 div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] p {
     color: #155724 !important; /* Dark green text */
 }
+
+div[data-testid="stAlert"] p {
+    font-size: 1.5em !important;
+    font-weight: bold !important;
+    color: rgb(255, 0, 0) !important;
+}

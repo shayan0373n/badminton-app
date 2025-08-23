@@ -39,13 +39,14 @@ def validate_session_setup(player_ids, num_courts):
             return False, f"Error: Not enough players ({total_players}) for {num_courts} courts."
         return True, None
 
-def start_session(player_table, num_courts, weights, ff_power_penalty):
+def start_session(player_table, num_courts, weights, ff_power_penalty, mf_power_penalty):
     """Creates and starts a new badminton session."""
     session = ClubNightSession(
         players=player_table,
         num_courts=num_courts,
         weights=weights,
-        ff_power_penalty=ff_power_penalty
+    ff_power_penalty=ff_power_penalty,
+    mf_power_penalty=mf_power_penalty
     )
     session.prepare_round()
     
@@ -230,18 +231,22 @@ with st.sidebar:
     # Initialize ff_power_penalty within the sidebar context, from weights or default
     if 'ff_power_penalty' not in st.session_state:
         st.session_state.ff_power_penalty = st.session_state.weights.get('ff_power_penalty', DEFAULT_WEIGHTS['ff_power_penalty'])
+    if 'mf_power_penalty' not in st.session_state:
+        st.session_state.mf_power_penalty = st.session_state.weights.get('mf_power_penalty', DEFAULT_WEIGHTS['mf_power_penalty'])
 
     # Let the widgets manage their own state via keys
     st.number_input("Skill Balance", min_value=0, step=1, key='skill_weight')
     st.number_input("Power Balance", min_value=0, step=1, key='power_weight')
     st.number_input("Pairing History", min_value=0, step=1, key='pairing_weight')
     st.number_input("FF Power Penalty", min_value=-10, max_value=0, step=1, key='ff_power_penalty', help="Penalty for FF pairs")
+    st.number_input("MF Power Penalty", min_value=-10, max_value=0, step=1, key='mf_power_penalty', help="Penalty for MF pairs")
 
     # Update the central weights dictionary from the widget states
     st.session_state.weights['skill'] = st.session_state.skill_weight
     st.session_state.weights['power'] = st.session_state.power_weight
     st.session_state.weights['pairing'] = st.session_state.pairing_weight
     st.session_state.weights['ff_power_penalty'] = st.session_state.ff_power_penalty # Update ff_power_penalty in weights
+    st.session_state.weights['mf_power_penalty'] = st.session_state.mf_power_penalty # Update mf_power_penalty in weights
     if 'gender' in st.session_state.weights:
         del st.session_state.weights['gender']
 
@@ -277,7 +282,13 @@ if st.button("🚀 Start New Session", type="primary"):
     
     if is_valid:
         # If validation passes, start the session
-        start_session(player_table, num_courts, st.session_state.weights, st.session_state.weights['ff_power_penalty'])
+        start_session(
+            player_table,
+            num_courts,
+            st.session_state.weights,
+            st.session_state.weights['ff_power_penalty'],
+            st.session_state.weights['mf_power_penalty']
+        )
     else:
         # If validation fails, show error
         st.error(error_message)

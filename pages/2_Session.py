@@ -65,16 +65,21 @@ with col1:
                         )
                         if winner_selection == team_A_names:
                             winners_by_court[match['court']] = team_A
-                        else:
+                        elif winner_selection == team_B_names:
                             winners_by_court[match['court']] = team_B
+                        else:
+                            winners_by_court[match['court']] = None
     
-        submitted = st.form_submit_button("✅ Confirm Results & Prepare Next Round")
+        submitted = st.form_submit_button("✅ Confirm Results")
         if submitted:
             if winners_by_court:
-                session.finalize_round(winners_by_court)
-                session.prepare_round()
-                SessionManager.save(session)  # Save the updated session state
-                st.rerun()
+                if all(v is not None for v in winners_by_court.values()):
+                    session.finalize_round(winners_by_court)
+                    session.prepare_round()
+                    SessionManager.save(session)  # Save the updated session state
+                    st.rerun()
+                else:
+                    st.warning("Please select a winner for each court before submitting.")
             else:
                 st.warning("Cannot process results as no courts were available.")
 
@@ -94,6 +99,21 @@ with col2:
 # --- Session Management in Sidebar ---
 with st.sidebar:
     st.header("Manage Session")
+    with st.expander("➕ Add Player", expanded=False):
+        new_name = st.text_input("Player Name", key="mid_add_name")
+        new_gender = st.selectbox("Gender", options=["M", "F"], key="mid_add_gender")
+        new_pre = st.number_input("Pre-Rating", min_value=0, step=1, value=1, key="mid_add_pre")
+        if st.button("Add Player Now", key="mid_add_btn"):
+            if not new_name.strip():
+                st.warning("Please enter a player name.")
+            else:
+                added = session.add_player(new_name.strip(), new_gender, int(new_pre))
+                if added:
+                    SessionManager.save(session)
+                    st.success(f"Added {new_name}: resting this round (earns 0.5) and queued for next round with average earned score.")
+                    st.rerun()
+                else:
+                    st.warning("A player with that name already exists.")
     if st.button("⚠️ Terminate Session"):
         # Preserve the player table for the next session
         if 'session' in st.session_state:

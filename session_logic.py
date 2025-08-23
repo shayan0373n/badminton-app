@@ -12,18 +12,14 @@ STATE_FILE = "session_state.pkl"
 class Player:
     name: str
     gender: str
-    pre_rating: int
-    rating: int = field(init=False)
-    earned_rating: int = 0
+    pre_rating: float
+    rating: float = field(init=False)
+    earned_rating: float = 0.0
 
     def __post_init__(self):
         self.rating = self.pre_rating
 
-    def get_initial_rating(self):
-        # This method can be simplified or removed if rating is set in post_init
-        return self.pre_rating
-
-    def add_rating(self, amount: int):
+    def add_rating(self, amount: float):
         """Adds rating to the player."""
         self.rating += amount
         self.earned_rating += amount
@@ -71,12 +67,13 @@ class ClubNightSession:
     Orchestrates a club night session using the optimizer for match generation.
     This class only contains game logic and no persistence code.
     """
-    def __init__(self, players, num_courts, weights=None, ff_power_penalty=0):
+    def __init__(self, players, num_courts, weights=None, ff_power_penalty=0, mf_power_penalty=0):
         self.player_pool = players
         self.num_courts = num_courts
         self.players_per_court = 4
         self.round_num = 0
         self.ff_power_penalty = ff_power_penalty
+        self.mf_power_penalty = mf_power_penalty
 
         # State required for the optimizer
         self.historical_partners = defaultdict(int)
@@ -84,7 +81,7 @@ class ClubNightSession:
 
         # Session flow state
         self.current_round_matches = None
-        self.resting_players = []
+        self.resting_players = set()
         self._rest_rotation_queue = list(self.player_pool.keys())
         random.shuffle(self._rest_rotation_queue)
 
@@ -101,7 +98,7 @@ class ClubNightSession:
         if num_to_rest < 0:
             raise ValueError("Not enough players for the number of courts.")
             
-        self.resting_players = self._rest_rotation_queue[:num_to_rest]
+        self.resting_players = set(self._rest_rotation_queue[:num_to_rest])
         
         # 2. Call the optimizer
         matches, updated_history = generate_one_round(
@@ -110,7 +107,8 @@ class ClubNightSession:
             num_courts=self.num_courts,
             historical_partners=self.historical_partners,
             weights=self.weights,
-            ff_power_penalty=self.ff_power_penalty
+            ff_power_penalty=self.ff_power_penalty,
+            mf_power_penalty=self.mf_power_penalty
         )
 
         if not matches:
@@ -151,3 +149,39 @@ class ClubNightSession:
         """Returns the current player ratings, sorted from highest to lowest."""
         standings = [(p.name, p.earned_rating) for p in self.player_pool.values()]
         return sorted(standings, key=lambda item: item[1], reverse=True)
+
+    def add_player(self, name: str, gender: str, pre_rating: int) -> bool:
+        """
+        Adds a new player mid-session.
+        - Appends the player to the end of the rest rotation queue.
+        - Initializes the player's earned score to the average earned score of existing players
+          so they are not disadvantaged in standings or court balance.
+
+        Returns True if added, False if the name already exists.
+        """
+        # Prevent duplicates by exact name match
+        if name in self.player_pool:
+            return False
+
+        # Create the player with base rating
+        new_player = Player(name=name, gender=gender, pre_rating=pre_rating)
+
+        # Compute average earned among existing players (exclude the new one)
+        existing_players = self.player_pool.values()
+        avg_earned = 0.0
+        if existing_players:
+            avg_earned = sum(p.earned_rating for p in existing_players) / len(existing_players)
+            # Round to nearest half point
+            avg_earned = round(avg_earned * 2) / 2
+
+        # Use add_rating to keep rating and earned_rating in sync
+        if avg_earned:
+            new_player.add_rating(avg_earned)
+
+        # Add to rest queue and player pool
+        self.player_pool[name] = new_player
+        self._rest_rotation_queue.append(name)
+        self.resting_players.add(name)
+
+        # Do not alter current round assignments; they'll be scheduled on next prepare_round()
+        return True

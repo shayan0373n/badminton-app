@@ -13,6 +13,7 @@ def generate_one_round(
     num_courts,
     historical_partners,
     ff_power_penalty=0,
+    mf_power_penalty=0,
     players_per_court=4,
     weights=None
 ):
@@ -49,7 +50,10 @@ def generate_one_round(
     total_skill_objective = pulp.lpSum(max_rating_on_court[c] - min_rating_on_court[c] for c in range(num_courts))
 
     max_team_power = pulp.LpVariable.dicts("MaxTeamPower", range(num_courts), lowBound=0)
-    min_team_power = pulp.LpVariable.dicts("MinTeamPower", range(num_courts), lowBound=min(ff_power_penalty, 0))
+    # Allow negative lower bound if penalties can make pair power negative
+    min_team_power = pulp.LpVariable.dicts(
+        "MinTeamPower", range(num_courts), lowBound=min(ff_power_penalty, mf_power_penalty, 0)
+    )
     total_power_objective = pulp.lpSum(max_team_power[c] - min_team_power[c] for c in range(num_courts))
 
     total_pairing_objective = pulp.lpSum(
@@ -90,6 +94,9 @@ def generate_one_round(
             # Apply penalty if both players are female
             if player_genders[p1] == 'F' and player_genders[p2] == 'F':
                 pair_power += ff_power_penalty
+            # Apply penalty if pair is mixed (one male, one female)
+            elif {player_genders[p1], player_genders[p2]} == {'M', 'F'}:
+                pair_power += mf_power_penalty
             prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
             prob += min_team_power[c] <= pair_power * t[(p1, p2)][c] + max_possible_team_power * (1 - t[(p1, p2)][c])
 

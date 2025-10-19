@@ -20,18 +20,14 @@ inject_css("styles.css")
 
 # --- Page Entry Logic ---
 # If the session object is lost (e.g., page reload), try to load it from the file.
-if 'session' not in st.session_state:
-    session = SessionManager.load()
-    if session:
-        st.session_state.session = session
-    else:
-        # If loading fails or there's no session file, go back to the setup page.
-        st.error("No active session found. Please start a new one.")
-        st.switch_page("1_Setup.py")
+if 'session' not in st.session_state or 'current_session_name' not in st.session_state:
+    st.error("No active session found. Please start or resume a session.")
+    st.switch_page("1_Setup.py")
 
 # --- Main App Display ---
 session = st.session_state.session
-st.title("🏸 Current Round")
+session_name = st.session_state.current_session_name
+st.title(f"🏸 {session_name}")
 
 col1, col2 = st.columns([2, 1])
 
@@ -76,7 +72,7 @@ with col1:
                 if all(v is not None for v in winners_by_court.values()):
                     session.finalize_round(winners_by_court)
                     session.prepare_round()
-                    SessionManager.save(session)  # Save the updated session state
+                    SessionManager.save(session, session_name)  # Save the updated session state
                     st.rerun()
                 else:
                     st.warning("Please select a winner for each court before submitting.")
@@ -109,20 +105,32 @@ with st.sidebar:
             else:
                 added = session.add_player(new_name.strip(), new_gender, int(new_pre))
                 if added:
-                    SessionManager.save(session)
+                    SessionManager.save(session, session_name)
                     st.success(f"Added {new_name}: resting this round (earns 0.5) and queued for next round with average earned score.")
                     st.rerun()
                 else:
                     st.warning("A player with that name already exists.")
     if st.button("⚠️ Terminate Session"):
-        # Preserve the player table for the next session
+        # Preserve the player table and session parameters for the next session
         if 'session' in st.session_state:
             st.session_state.player_table = st.session_state.session.player_pool
+            st.session_state.player_table_updated = True  # Flag to refresh editor
+            
+            # Preserve session parameters
+            st.session_state.num_courts_persistent = st.session_state.session.num_courts
+            st.session_state.weights = st.session_state.session.weights.copy()
+            st.session_state.skill_weight = st.session_state.weights.get('skill', 1.0)
+            st.session_state.power_weight = st.session_state.weights.get('power', 1.0)
+            st.session_state.pairing_weight = st.session_state.weights.get('pairing', 1.0)
+            st.session_state.ff_power_penalty = st.session_state.session.ff_power_penalty
+            st.session_state.mf_power_penalty = st.session_state.session.mf_power_penalty
         
-        SessionManager.clear()  # Clear the session state file
+        SessionManager.clear(session_name)  # Clear the session state file
         
-        # Clear only the session object, keeping player list and other settings
+        # Clear session objects from state
         if 'session' in st.session_state:
             del st.session_state['session']
+        if 'current_session_name' in st.session_state:
+            del st.session_state['current_session_name']
             
         st.switch_page("1_Setup.py")

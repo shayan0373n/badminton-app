@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from optimizer import generate_one_round
 
-STATE_FILE = "session_state.pkl"
+SESSIONS_DIR = "sessions"
 
 @dataclass
 class Player:
@@ -26,40 +26,56 @@ class Player:
 
 
 class SessionManager:
-    """Handles loading, saving, and clearing the session state from a file."""
+    """Handles loading, saving, and clearing named session states."""
 
     @staticmethod
-    def save(session_instance):
-        """Saves the given session instance to the state file."""
-        with open(STATE_FILE, "wb") as f:
+    def _get_session_path(session_name: str) -> str:
+        """Returns the file path for a given session name."""
+        os.makedirs(SESSIONS_DIR, exist_ok=True)
+        return os.path.join(SESSIONS_DIR, f"{session_name}.pkl")
+
+    @staticmethod
+    def save(session_instance, session_name: str):
+        """Saves the given session instance to a named file."""
+        path = SessionManager._get_session_path(session_name)
+        with open(path, "wb") as f:
             pickle.dump(session_instance, f)
-        print("--- Session State Saved ---")
+        print(f"--- Session '{session_name}' Saved ---")
 
     @staticmethod
-    def load():
+    def load(session_name: str):
         """
-        Loads a session from the state file if it exists.
+        Loads a session from a named file if it exists.
         Returns the session object or None.
         """
-        if os.path.exists(STATE_FILE):
+        path = SessionManager._get_session_path(session_name)
+        if os.path.exists(path):
             try:
-                with open(STATE_FILE, "rb") as f:
+                with open(path, "rb") as f:
                     session = pickle.load(f)
-                    print("--- Session Resumed ---")
+                    print(f"--- Session '{session_name}' Loaded ---")
                     return session
             except (pickle.UnpicklingError, EOFError):
-                print("Failed to load session file. It might be corrupted.")
-                # Clean up corrupted file
-                os.remove(STATE_FILE)
+                print(f"Failed to load session '{session_name}'. It might be corrupted.")
+                os.remove(path)
                 return None
         return None
 
     @staticmethod
-    def clear():
-        """Clears the session by deleting the state file."""
-        if os.path.exists(STATE_FILE):
-            os.remove(STATE_FILE)
-            print("--- Session State Cleared ---")
+    def clear(session_name: str):
+        """Clears a named session by deleting its file."""
+        path = SessionManager._get_session_path(session_name)
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"--- Session '{session_name}' Cleared ---")
+
+    @staticmethod
+    def list_sessions():
+        """Returns a list of all available session names."""
+        if not os.path.exists(SESSIONS_DIR):
+            return []
+        files = [f for f in os.listdir(SESSIONS_DIR) if f.endswith('.pkl')]
+        return [f[:-4] for f in files]  # Remove .pkl extension
 
 
 class ClubNightSession:

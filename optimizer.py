@@ -4,6 +4,123 @@ import random
 from itertools import combinations
 
 # ============================================================================
+# Singles mode matching logic
+# ============================================================================
+def generate_singles_round(
+    available_players,
+    num_courts,
+    player_ratings,
+    player_genders,
+    historical_partners,
+    f_penalty=0,
+    weights=None
+):
+    """
+    Generates a singles round with 1v1 matches.
+    Uses simpler optimization focusing on skill balance and opponent history.
+    For singles, F penalty reduces each female player's effective rating for power balance.
+    """
+    if weights is None:
+        weights = {'skill': 1.0, 'power': 1.0, 'pairing': 1.0}
+    
+    # Apply F penalty to female players' ratings
+    adjusted_ratings = {}
+    for p in available_players:
+        if player_genders[p] == 'F':
+            adjusted_ratings[p] = player_ratings[p] + f_penalty  # f_penalty is negative
+        else:
+            adjusted_ratings[p] = player_ratings[p]
+    
+    prob = pulp.LpProblem("Badminton_Singles_Optimizer", pulp.LpMinimize)
+    
+    # x: Binary variable indicating if a player is on a court
+    x = pulp.LpVariable.dicts("OnCourt", (available_players, range(num_courts)), cat='Binary')
+    
+    # For singles, we track opponents (not partners)
+    player_pairs = list(combinations(sorted(available_players), 2))
+    o = pulp.LpVariable.dicts("Opponents", (player_pairs, range(num_courts)), cat='Binary')
+    
+    # Skill balance variables (using adjusted ratings)
+    max_rating_on_court = pulp.LpVariable.dicts("MaxRatingOnCourt", range(num_courts), lowBound=0)
+    min_rating_on_court = pulp.LpVariable.dicts("MinRatingOnCourt", range(num_courts), lowBound=min(adjusted_ratings.values()) if adjusted_ratings else 0)
+    total_skill_objective = pulp.lpSum(max_rating_on_court[c] - min_rating_on_court[c] for c in range(num_courts))
+    
+    # Opponent history objective (minimize playing same opponents)
+    total_pairing_objective = pulp.lpSum(
+        o[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
+        for pair in player_pairs for c in range(num_courts)
+    )
+    
+    prob += (
+        weights.get('skill', 1.0) * total_skill_objective +
+        weights.get('pairing', 1.0) * total_pairing_objective
+    ), "Minimize_Weighted_Objectives"
+    
+    # Constraints: exactly 2 players per court
+    for c in range(num_courts):
+        prob += pulp.lpSum(x[p][c] for p in available_players) == 2
+    
+    # Each player plays at most once
+    for p in available_players:
+        prob += pulp.lpSum(x[p][c] for c in range(num_courts)) <= 1
+    
+    # Total players on all courts
+    prob += pulp.lpSum(x[p][c] for p in available_players for c in range(num_courts)) == num_courts * 2
+    
+    # Link opponent variables
+    for p1, p2 in player_pairs:
+        for c in range(num_courts):
+            prob += o[(p1, p2)][c] <= x[p1][c]
+            prob += o[(p1, p2)][c] <= x[p2][c]
+            prob += o[(p1, p2)][c] >= x[p1][c] + x[p2][c] - 1
+    
+    # Skill balance constraints (using adjusted ratings)
+    max_possible_rating = max(adjusted_ratings.values()) if adjusted_ratings else 0
+    for c in range(num_courts):
+        for p in available_players:
+            prob += max_rating_on_court[c] >= adjusted_ratings[p] * x[p][c]
+            prob += min_rating_on_court[c] <= adjusted_ratings[p] * x[p][c] + max_possible_rating * (1 - x[p][c])
+    
+    # Solve
+    solver = pulp.GUROBI(msg=False, timeLimit=10)
+    prob.solve(solver)
+    
+    if prob.status == pulp.LpStatusInfeasible:
+        print(f"ERROR: No optimal solution found. Status: {pulp.LpStatus[prob.status]}")
+        return None, historical_partners
+    
+    ## DEBUG ##
+    print("Max Rating on Court:", {c: max_rating_on_court[c].value() for c in range(num_courts)})
+    print("Min Rating on Court:", {c: min_rating_on_court[c].value() for c in range(num_courts)})
+    print("Total Skill Objective:", pulp.value(total_skill_objective))
+    print("Total Pairing Objective:", pulp.value(total_pairing_objective))
+    print("Objective Value:", pulp.value(prob.objective))
+    ## END DEBUG ##
+    
+    # Build matches
+    matches = []
+    updated_historical_partners = historical_partners.copy()
+    
+    for c in range(num_courts):
+        court_players = [p for p in available_players if x[p][c].value() > 0.5]
+        
+        if len(court_players) == 2:
+            p1, p2 = sorted(court_players)
+            pair_key = tuple(sorted((p1, p2)))
+            updated_historical_partners[pair_key] += 1
+            
+            matches.append({
+                "court": c + 1,
+                "player_1": p1,
+                "player_2": p2,
+                "player_1_rating": adjusted_ratings[p1],
+                "player_2_rating": adjusted_ratings[p2],
+                "rating_diff": abs(adjusted_ratings[p1] - adjusted_ratings[p2])
+            })
+    
+    return matches, updated_historical_partners
+
+# ============================================================================
 # This is the core function from our previous work. It is included here
 # so this script can be run as a standalone file.
 # ============================================================================
@@ -15,10 +132,12 @@ def generate_one_round(
     ff_power_penalty=0,
     mf_power_penalty=0,
     players_per_court=4,
-    weights=None
+    weights=None,
+    game_mode="Doubles"
 ):
     """
     Generates a single, optimized round of badminton matches.
+    Supports both Doubles (4 players per court) and Singles (2 players per court).
     """
     player_ratings = {p.name: p.rating for p in players}
     player_genders = {p.name: p.gender for p in players}
@@ -36,6 +155,13 @@ def generate_one_round(
     if num_available < players_needed:
         print(f"Error: Not enough players ({num_available}) for the courts ({players_needed} needed).")
         return None, historical_partners
+
+    # For singles mode, use simpler matching logic
+    if game_mode == "Singles":
+        return generate_singles_round(
+            available_players, num_courts, player_ratings, player_genders, 
+            historical_partners, ff_power_penalty, weights
+        )
 
     prob = pulp.LpProblem("Badminton_Full_Optimizer", pulp.LpMinimize)
 

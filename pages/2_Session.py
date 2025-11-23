@@ -27,7 +27,7 @@ if 'session' not in st.session_state or 'current_session_name' not in st.session
 # --- Main App Display ---
 session = st.session_state.session
 session_name = st.session_state.current_session_name
-st.title(f"🏸 {session_name}")
+st.title(f"🏸 {session_name} ({session.game_mode})")
 
 col1, col2 = st.columns([2, 1])
 
@@ -49,22 +49,42 @@ with col1:
                     with cols[0]:
                         st.markdown(f"#### Court {match['court']}")
                     with cols[1]:
-                        team_A = match['team_1']
-                        team_B = match['team_2']
-                        team_A_names = f"{team_A[0]} -- {team_A[1]}"
-                        team_B_names = f"{team_B[0]} -- {team_B[1]}"
-                        winner_selection = st.segmented_control(
-                            "Select Winner", 
-                            (team_A_names, team_B_names), 
-                            key=f"court_{match['court']}",
-                            label_visibility="collapsed"
-                        )
-                        if winner_selection == team_A_names:
-                            winners_by_court[match['court']] = team_A
-                        elif winner_selection == team_B_names:
-                            winners_by_court[match['court']] = team_B
+                        if session.game_mode == "Singles":
+                            # Singles: 1v1 match
+                            player_1 = match['player_1']
+                            player_2 = match['player_2']
+                            player_1_name = player_1
+                            player_2_name = player_2
+                            winner_selection = st.segmented_control(
+                                "Select Winner", 
+                                (player_1_name, player_2_name), 
+                                key=f"court_{match['court']}",
+                                label_visibility="collapsed"
+                            )
+                            if winner_selection == player_1_name:
+                                winners_by_court[match['court']] = (player_1,)
+                            elif winner_selection == player_2_name:
+                                winners_by_court[match['court']] = (player_2,)
+                            else:
+                                winners_by_court[match['court']] = None
                         else:
-                            winners_by_court[match['court']] = None
+                            # Doubles: 2v2 match
+                            team_A = match['team_1']
+                            team_B = match['team_2']
+                            team_A_names = f"{team_A[0]} -- {team_A[1]}"
+                            team_B_names = f"{team_B[0]} -- {team_B[1]}"
+                            winner_selection = st.segmented_control(
+                                "Select Winner", 
+                                (team_A_names, team_B_names), 
+                                key=f"court_{match['court']}",
+                                label_visibility="collapsed"
+                            )
+                            if winner_selection == team_A_names:
+                                winners_by_court[match['court']] = team_A
+                            elif winner_selection == team_B_names:
+                                winners_by_court[match['court']] = team_B
+                            else:
+                                winners_by_court[match['court']] = None
     
         submitted = st.form_submit_button("✅ Confirm Results")
         if submitted:
@@ -110,6 +130,33 @@ with st.sidebar:
                     st.rerun()
                 else:
                     st.warning("A player with that name already exists.")
+    
+    with st.expander("➖ Remove Player", expanded=False):
+        # Show queued removals if any
+        if session.queued_removals:
+            st.warning(f"⏳ Queued for removal: {', '.join(sorted(session.queued_removals))}")
+            st.caption("These players will be removed when you confirm the current round results.")
+        
+        # Get list of all players
+        all_players = list(session.player_pool.keys())
+        if all_players:
+            player_to_remove = st.selectbox("Select Player to Remove", options=sorted(all_players), key="remove_player_select")
+            if st.button("Remove Player", key="mid_remove_btn", type="secondary"):
+                success, status = session.remove_player(player_to_remove)
+                if success:
+                    if status == 'immediate':
+                        SessionManager.save(session, session_name)
+                        st.success(f"✅ Removed {player_to_remove} from the session.")
+                        st.rerun()
+                    elif status == 'queued':
+                        SessionManager.save(session, session_name)
+                        st.info(f"⏳ {player_to_remove} is currently playing and will be removed after you confirm this round's results.")
+                        st.rerun()
+                else:
+                    st.error(f"Player {player_to_remove} not found.")
+        else:
+            st.info("No players to remove.")
+    
     if st.button("⚠️ Terminate Session"):
         # Preserve the player table and session parameters for the next session
         if 'session' in st.session_state:
@@ -118,6 +165,7 @@ with st.sidebar:
             
             # Preserve session parameters
             st.session_state.num_courts_persistent = st.session_state.session.num_courts
+            st.session_state.game_mode_persistent = st.session_state.session.game_mode
             st.session_state.weights = st.session_state.session.weights.copy()
             st.session_state.skill_weight = st.session_state.weights.get('skill', 1.0)
             st.session_state.power_weight = st.session_state.weights.get('power', 1.0)

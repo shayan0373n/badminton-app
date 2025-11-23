@@ -83,10 +83,11 @@ class ClubNightSession:
     Orchestrates a club night session using the optimizer for match generation.
     This class only contains game logic and no persistence code.
     """
-    def __init__(self, players, num_courts, weights=None, ff_power_penalty=0, mf_power_penalty=0):
+    def __init__(self, players, num_courts, weights=None, ff_power_penalty=0, mf_power_penalty=0, game_mode="Doubles"):
         self.player_pool = players
         self.num_courts = num_courts
-        self.players_per_court = 4
+        self.game_mode = game_mode
+        self.players_per_court = 2 if game_mode == "Singles" else 4
         self.round_num = 0
         self.ff_power_penalty = ff_power_penalty
         self.mf_power_penalty = mf_power_penalty
@@ -100,6 +101,7 @@ class ClubNightSession:
         self.resting_players = set()
         self._rest_rotation_queue = list(self.player_pool.keys())
         random.shuffle(self._rest_rotation_queue)
+        self.queued_removals = set()  # Players marked for removal
 
     def prepare_round(self):
         """
@@ -107,24 +109,27 @@ class ClubNightSession:
         """
         self.round_num += 1
 
-        # 1. Determine who is resting
-        num_players_to_play = self.num_courts * self.players_per_court
-        num_to_rest = len(self.player_pool) - num_players_to_play
+        # 1. Determine who is resting and adjust courts if needed
+        total_players = len(self.player_pool)
+        max_courts = total_players // self.players_per_court
+        active_courts = min(self.num_courts, max_courts)
         
-        if num_to_rest < 0:
-            raise ValueError("Not enough players for the number of courts.")
+        num_players_to_play = active_courts * self.players_per_court
+        num_to_rest = total_players - num_players_to_play
             
         self.resting_players = set(self._rest_rotation_queue[:num_to_rest])
         
-        # 2. Call the optimizer
+        # 2. Call the optimizer with adjusted court count
         matches, updated_history = generate_one_round(
             players=list(self.player_pool.values()),
             players_to_rest=self.resting_players,
-            num_courts=self.num_courts,
+            num_courts=active_courts,
             historical_partners=self.historical_partners,
             weights=self.weights,
             ff_power_penalty=self.ff_power_penalty,
-            mf_power_penalty=self.mf_power_penalty
+            mf_power_penalty=self.mf_power_penalty,
+            players_per_court=self.players_per_court,
+            game_mode=self.game_mode
         )
 
         if not matches:
@@ -160,6 +165,10 @@ class ClubNightSession:
         
         # Clear the matches for the completed round
         self.current_round_matches = None
+        
+        # Process any queued player removals
+        for player_name in list(self.queued_removals):
+            self._remove_player_now(player_name)
 
     def get_standings(self):
         """Returns the current player ratings, sorted from highest to lowest."""
@@ -199,5 +208,48 @@ class ClubNightSession:
         self._rest_rotation_queue.append(name)
         self.resting_players.add(name)
 
-        # Do not alter current round assignments; they'll be scheduled on next prepare_round()
         return True
+
+    def remove_player(self, name: str) -> tuple[bool, str]:
+        """
+        Marks a player for removal from the session.
+        - If player is currently playing, queues them for removal after round confirmation
+        - If player is resting or no round active, removes immediately
+
+        Returns (success, status) where status is 'immediate', 'queued', or 'not_found'.
+        """
+        if name not in self.player_pool:
+            return False, 'not_found'
+        
+        # Check if player is currently playing (in current_round_matches)
+        is_playing = False
+        if self.current_round_matches:
+            for match in self.current_round_matches:
+                if self.game_mode == "Singles":
+                    if name in [match['player_1'], match['player_2']]:
+                        is_playing = True
+                        break
+                else:  # Doubles
+                    if name in match['team_1'] or name in match['team_2']:
+                        is_playing = True
+                        break
+        
+        if is_playing:
+            # Queue for removal after round confirmation
+            self.queued_removals.add(name)
+            return True, 'queued'
+        else:
+            # Remove immediately
+            self._remove_player_now(name)
+            return True, 'immediate'
+    
+    def _remove_player_now(self, name: str):
+        """Internal method to actually remove a player from all structures."""
+        if name in self.player_pool:
+            del self.player_pool[name]
+        if name in self._rest_rotation_queue:
+            self._rest_rotation_queue.remove(name)
+        if name in self.resting_players:
+            self.resting_players.remove(name)
+        if name in self.queued_removals:
+            self.queued_removals.remove(name)

@@ -18,7 +18,7 @@ if st.secrets.get("GUROBI_LIC"):
 import pandas as pd
 import random
 from session_logic import ClubNightSession, SessionManager, Player
-from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT
+from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, PLAYERS_PER_COURT, GAME_MODE_DOUBLES, GAME_MODE_SINGLES, DEFAULT_GAME_MODE
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -41,7 +41,7 @@ def generate_session_name():
     timestamp = datetime.now().strftime("%m%d-%H%M")
     return f"{word}-{timestamp}"
 
-def validate_session_setup(player_ids, num_courts):
+def validate_session_setup(player_ids, num_courts, game_mode):
     """Validates player list and court count. Returns (is_valid, error_message)."""
     if len(player_ids) != len(set(player_ids)):
         return False, "Error: Duplicate names found in the player list."
@@ -49,20 +49,22 @@ def validate_session_setup(player_ids, num_courts):
         return False, "Please add players to the list before starting."
     else:
         total_players = len(player_ids)
-        players_on_court = num_courts * PLAYERS_PER_COURT
+        players_per_court = 2 if game_mode == GAME_MODE_SINGLES else 4
+        players_on_court = num_courts * players_per_court
         rests_per_round = total_players - players_on_court
         if rests_per_round < 0:
-            return False, f"Error: Not enough players ({total_players}) for {num_courts} courts."
+            return False, f"Error: Not enough players ({total_players}) for {num_courts} courts in {game_mode} mode."
         return True, None
 
-def start_session(player_table, num_courts, weights, ff_power_penalty, mf_power_penalty, session_name):
+def start_session(player_table, num_courts, weights, ff_power_penalty, mf_power_penalty, session_name, game_mode):
     """Creates and starts a new badminton session."""
     session = ClubNightSession(
         players=player_table,
         num_courts=num_courts,
         weights=weights,
         ff_power_penalty=ff_power_penalty,
-        mf_power_penalty=mf_power_penalty
+        mf_power_penalty=mf_power_penalty,
+        game_mode=game_mode
     )
     session.prepare_round()
     
@@ -275,6 +277,24 @@ with st.sidebar:
     if 'gender' in st.session_state.weights:
         del st.session_state.weights['gender']
 
+# Initialize persistent game mode
+if 'game_mode_persistent' not in st.session_state:
+    st.session_state.game_mode_persistent = DEFAULT_GAME_MODE
+
+# Initialize the widget key if it doesn't exist or restore from persistent value
+if 'game_mode_input' not in st.session_state:
+    st.session_state.game_mode_input = st.session_state.game_mode_persistent
+
+game_mode = st.radio(
+    "Game Mode",
+    [GAME_MODE_DOUBLES, GAME_MODE_SINGLES],
+    key="game_mode_input",
+    horizontal=True
+)
+
+# Keep the persistent value in sync with the widget
+st.session_state.game_mode_persistent = game_mode
+
 # Initialize persistent number of courts (survives session resets)
 if 'num_courts_persistent' not in st.session_state:
     st.session_state.num_courts_persistent = DEFAULT_NUM_COURTS
@@ -312,7 +332,7 @@ if st.button("🚀 Start New Session", type="primary"):
     player_ids = list(player_table.keys())
     
     # Validate first
-    is_valid, error_message = validate_session_setup(player_ids, num_courts)
+    is_valid, error_message = validate_session_setup(player_ids, num_courts, game_mode)
     
     if is_valid:
         # If validation passes, start the session
@@ -322,7 +342,8 @@ if st.button("🚀 Start New Session", type="primary"):
             st.session_state.weights,
             st.session_state.weights['ff_power_penalty'],
             st.session_state.weights['mf_power_penalty'],
-            final_session_name
+            final_session_name,
+            game_mode
         )
     else:
         # If validation fails, show error

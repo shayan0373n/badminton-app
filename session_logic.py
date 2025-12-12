@@ -170,6 +170,13 @@ class ClubNightSession:
         for player_name in list(self.queued_removals):
             self._remove_player_now(player_name)
 
+    def update_courts(self, new_num_courts: int):
+        """Updates available courts mid session; applies on the next prepared round."""
+        new_num_courts = int(new_num_courts)
+        if new_num_courts < 1:
+            raise ValueError("Number of courts must be at least 1.")
+        self.num_courts = new_num_courts
+
     def get_standings(self):
         """Returns the current player ratings, sorted from highest to lowest."""
         standings = [(p.name, p.earned_rating) for p in self.player_pool.values()]

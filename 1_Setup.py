@@ -48,12 +48,7 @@ def validate_session_setup(player_ids, num_courts, game_mode):
     elif not player_ids:
         return False, "Please add players to the list before starting."
     else:
-        total_players = len(player_ids)
-        players_per_court = 2 if game_mode == GAME_MODE_SINGLES else 4
-        players_on_court = num_courts * players_per_court
-        rests_per_round = total_players - players_on_court
-        if rests_per_round < 0:
-            return False, f"Error: Not enough players ({total_players}) for {num_courts} courts in {game_mode} mode."
+        # Allow starting even if there are more courts than players; extra courts will sit idle
         return True, None
 
 def start_session(player_table, num_courts, weights, ff_power_penalty, mf_power_penalty, session_name, game_mode):
@@ -333,7 +328,17 @@ if st.button("🚀 Start New Session", type="primary"):
     
     # Validate first
     is_valid, error_message = validate_session_setup(player_ids, num_courts, game_mode)
-    
+
+    # Provide a heads-up if there are more courts than can be filled
+    players_per_court = 2 if game_mode == GAME_MODE_SINGLES else 4
+    total_players = len(player_ids)
+    possible_courts = total_players // players_per_court
+    if num_courts > possible_courts:
+        st.info(
+            f"Only {possible_courts} court(s) can be filled with {total_players} players in {game_mode} mode. "
+            "Extra courts will remain idle until more players join."
+        )
+
     if is_valid:
         # If validation passes, start the session
         start_session(

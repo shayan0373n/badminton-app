@@ -115,6 +115,24 @@ with col2:
 # --- Session Management in Sidebar ---
 with st.sidebar:
     st.header("Manage Session")
+
+    with st.expander("🎾 Courts", expanded=False):
+        st.markdown(f"**Courts:** {int(session.num_courts)}")
+        col_add, col_remove = st.columns(2)
+        with col_add:
+            if st.button("Add court", key="add_court_btn", use_container_width=True):
+                session.update_courts(session.num_courts + 1)
+                SessionManager.save(session, session_name)
+                st.rerun()
+        with col_remove:
+            if st.button("Remove court", key="remove_court_btn", use_container_width=True):
+                if session.num_courts > 1:
+                    session.update_courts(session.num_courts - 1)
+                    SessionManager.save(session, session_name)
+                    st.rerun()
+                else:
+                    st.info("Minimum 1 court.")
+
     with st.expander("➕ Add Player", expanded=False):
         new_name = st.text_input("Player Name", key="mid_add_name")
         new_gender = st.selectbox("Gender", options=["M", "F"], key="mid_add_gender")

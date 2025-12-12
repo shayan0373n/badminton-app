@@ -37,6 +37,14 @@ with col1:
     # Resting players info
     st.info(f"**Resting:** {', '.join(session.resting_players)}")
 
+    # Get locked pairs for visual indicators
+    locked_pairs = []
+    if session.game_mode == "Doubles":
+        teammate_pairs = session.get_teammate_pairs()
+        locked_pairs_set = set(tuple(sorted(pair)) for pair in teammate_pairs)
+    else:
+        locked_pairs_set = set()
+
     # Results form
     with st.form(key='results_form'):
         winners_by_court = {}
@@ -71,8 +79,22 @@ with col1:
                             # Doubles: 2v2 match
                             team_A = match['team_1']
                             team_B = match['team_2']
+                            
+                            # Add visual indicator for locked pairs
+                            team_A_key = tuple(sorted(team_A))
+                            team_B_key = tuple(sorted(team_B))
+                            team_A_locked = team_A_key in locked_pairs_set
+                            team_B_locked = team_B_key in locked_pairs_set
+                            
+                            lock_icon = "🔗"
                             team_A_names = f"{team_A[0]} -- {team_A[1]}"
                             team_B_names = f"{team_B[0]} -- {team_B[1]}"
+                            
+                            if team_A_locked:
+                                team_A_names = f"{lock_icon} {team_A_names}"
+                            if team_B_locked:
+                                team_B_names = f"{lock_icon} {team_B_names}"
+                            
                             winner_selection = st.segmented_control(
                                 "Select Winner", 
                                 (team_A_names, team_B_names), 
@@ -137,11 +159,17 @@ with st.sidebar:
         new_name = st.text_input("Player Name", key="mid_add_name")
         new_gender = st.selectbox("Gender", options=["M", "F"], key="mid_add_gender")
         new_pre = st.number_input("Pre-Rating", min_value=0, step=1, value=1, key="mid_add_pre")
+        
+        # Only show Team Name field for Doubles mode
+        new_team_name = ""
+        if session.game_mode == "Doubles":
+            new_team_name = st.text_input("Team Name (optional)", key="mid_add_team", help="Leave empty for no pairing, or enter a team name to pair with another player")
+        
         if st.button("Add Player Now", key="mid_add_btn"):
             if not new_name.strip():
                 st.warning("Please enter a player name.")
             else:
-                added = session.add_player(new_name.strip(), new_gender, int(new_pre))
+                added = session.add_player(new_name.strip(), new_gender, int(new_pre), new_team_name.strip())
                 if added:
                     SessionManager.save(session, session_name)
                     st.success(f"Added {new_name}: resting this round (earns 0.5) and queued for next round with average earned score.")

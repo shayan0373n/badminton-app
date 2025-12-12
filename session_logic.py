@@ -15,6 +15,7 @@ class Player:
     pre_rating: float
     rating: float = field(init=False)
     earned_rating: float = 0.0
+    team_name: str = ""  # Optional team name for permanent pairing
 
     def __post_init__(self):
         self.rating = self.pre_rating
@@ -102,6 +103,19 @@ class ClubNightSession:
         self._rest_rotation_queue = list(self.player_pool.keys())
         random.shuffle(self._rest_rotation_queue)
         self.queued_removals = set()  # Players marked for removal
+        
+    def get_teammate_pairs(self):
+        """Extract teammate pairs from player team names. Returns list of (player1, player2) tuples."""
+        team_groups = defaultdict(list)
+        for player_name, player in self.player_pool.items():
+            if player.team_name and player.team_name.strip():
+                team_groups[player.team_name.strip()].append(player_name)
+        
+        pairs = []
+        for team_name, members in team_groups.items():
+            if len(members) == 2:
+                pairs.append(tuple(sorted(members)))
+        return pairs
 
     def prepare_round(self):
         """
@@ -109,6 +123,15 @@ class ClubNightSession:
         """
         self.round_num += 1
 
+        # Get teammate pairs for this round
+        teammate_pairs = self.get_teammate_pairs() if self.game_mode == "Doubles" else []
+        
+        # Create a set of all players who are in a locked pair
+        paired_players = set()
+        for p1, p2 in teammate_pairs:
+            paired_players.add(p1)
+            paired_players.add(p2)
+        
         # 1. Determine who is resting and adjust courts if needed
         total_players = len(self.player_pool)
         max_courts = total_players // self.players_per_court
@@ -116,10 +139,39 @@ class ClubNightSession:
         
         num_players_to_play = active_courts * self.players_per_court
         num_to_rest = total_players - num_players_to_play
-            
-        self.resting_players = set(self._rest_rotation_queue[:num_to_rest])
         
-        # 2. Call the optimizer with adjusted court count
+        # Rest rotation with pair coordination
+        # Build a map of player -> their partner (if any)
+        partner_map = {}
+        for p1, p2 in teammate_pairs:
+            partner_map[p1] = p2
+            partner_map[p2] = p1
+        
+        resting = []
+        already_processed = set()
+        
+        # Go through the rotation queue in order
+        for player in self._rest_rotation_queue:
+            if player in already_processed:
+                continue
+                
+            if len(resting) >= num_to_rest:
+                break
+            
+            # Add this player to resting list
+            resting.append(player)
+            already_processed.add(player)
+            
+            # If they have a teammate AND we still need more resting players, add teammate too
+            if player in partner_map and len(resting) < num_to_rest:
+                partner = partner_map[player]
+                if partner not in already_processed:
+                    resting.append(partner)
+                    already_processed.add(partner)
+        
+        self.resting_players = set(resting)
+        
+        # 2. Call the optimizer with adjusted court count and teammate pairs
         matches, updated_history = generate_one_round(
             players=list(self.player_pool.values()),
             players_to_rest=self.resting_players,
@@ -129,7 +181,8 @@ class ClubNightSession:
             ff_power_penalty=self.ff_power_penalty,
             mf_power_penalty=self.mf_power_penalty,
             players_per_court=self.players_per_court,
-            game_mode=self.game_mode
+            game_mode=self.game_mode,
+            teammate_pairs=teammate_pairs
         )
 
         if not matches:
@@ -140,9 +193,9 @@ class ClubNightSession:
             self.current_round_matches = sorted(matches, key=lambda m: m['court'])
         
         # 4. Rotate the rest queue for the next round
-        players_who_rested = self._rest_rotation_queue[:num_to_rest]
+        players_who_rested = [p for p in self._rest_rotation_queue if p in self.resting_players]
         random.shuffle(players_who_rested)
-        self._rest_rotation_queue = self._rest_rotation_queue[num_to_rest:] + players_who_rested
+        self._rest_rotation_queue = [p for p in self._rest_rotation_queue if p not in self.resting_players] + players_who_rested
 
     def finalize_round(self, winners_by_court):
         """
@@ -182,7 +235,7 @@ class ClubNightSession:
         standings = [(p.name, p.earned_rating) for p in self.player_pool.values()]
         return sorted(standings, key=lambda item: item[1], reverse=True)
 
-    def add_player(self, name: str, gender: str, pre_rating: int) -> bool:
+    def add_player(self, name: str, gender: str, pre_rating: int, team_name: str = "") -> bool:
         """
         Adds a new player mid-session.
         - Appends the player to the end of the rest rotation queue.
@@ -196,7 +249,7 @@ class ClubNightSession:
             return False
 
         # Create the player with base rating
-        new_player = Player(name=name, gender=gender, pre_rating=pre_rating)
+        new_player = Player(name=name, gender=gender, pre_rating=pre_rating, team_name=team_name)
 
         # Compute average earned among existing players (exclude the new one)
         existing_players = self.player_pool.values()

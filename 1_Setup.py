@@ -109,19 +109,25 @@ if 'player_table' not in st.session_state:
     st.session_state.player_table = DEFAULT_PLAYERS_TABLE.copy()
 
 # Helper function to create editor DataFrame from player_table
-def create_editor_dataframe(player_table):
+def create_editor_dataframe(player_table, game_mode=DEFAULT_GAME_MODE):
     """Creates a DataFrame for the editor from player_table."""
     player_ranks = range(1, len(player_table) + 1)
-    return pd.DataFrame({
+    df_data = {
         "#": player_ranks,
         "Player Name": [p.name for p in player_table.values()],
         "Gender": [p.gender for p in player_table.values()],
         "Pre-Rating": [p.pre_rating for p in player_table.values()],
-    })
+    }
+    # Only add Team Name column for Doubles mode
+    if game_mode == GAME_MODE_DOUBLES:
+        df_data["Team Name"] = [p.team_name if hasattr(p, 'team_name') else "" for p in player_table.values()]
+    return pd.DataFrame(df_data)
 
 # Initialize the editor's DataFrame if it doesn't exist
 if 'editor_df' not in st.session_state:
-    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table)
+    # Need to get game_mode early, use default if not set
+    current_game_mode = st.session_state.get('game_mode_persistent', DEFAULT_GAME_MODE)
+    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table, current_game_mode)
 
 # --- CSV Upload Logic ---
 uploaded_file = st.file_uploader("Upload Players CSV", type=['csv'])
@@ -145,19 +151,26 @@ if uploaded_file is not None:
                 # --- Data Processing ---
                 # Ensure Pre-Rating is numeric
                 new_players_df["Pre-Rating"] = pd.to_numeric(new_players_df["Pre-Rating"], errors='coerce').fillna(0).astype(int)
+                # Handle optional Team Name column
+                if "Team Name" not in new_players_df.columns:
+                    new_players_df["Team Name"] = ""
+                new_players_df["Team Name"] = new_players_df["Team Name"].fillna("").astype(str)
+                
                 # Create the player table from the CSV data
                 player_table = {
                     row["Player Name"]: Player(
                         name=row["Player Name"],
                         gender=row["Gender"],
-                        pre_rating=row["Pre-Rating"]
+                        pre_rating=row["Pre-Rating"],
+                        team_name=row["Team Name"]
                     )
                     for _, row in new_players_df.iterrows()
                 }
 
                 # Update the session state
                 st.session_state.player_table = player_table
-                st.session_state.editor_df = create_editor_dataframe(player_table)
+                current_game_mode = st.session_state.get('game_mode_persistent', DEFAULT_GAME_MODE)
+                st.session_state.editor_df = create_editor_dataframe(player_table, current_game_mode)
                 
                 st.success("Successfully loaded players from CSV!")
 
@@ -166,34 +179,46 @@ if uploaded_file is not None:
 
 # If player_table was updated from a terminated session, refresh the editor
 if 'player_table_updated' in st.session_state:
-    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table)
+    current_game_mode = st.session_state.get('game_mode_persistent', DEFAULT_GAME_MODE)
+    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table, current_game_mode)
     del st.session_state.player_table_updated
 
 # Ensure editor_df is always a DataFrame before rendering
 if not isinstance(st.session_state.editor_df, pd.DataFrame):
-    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table)
+    current_game_mode = st.session_state.get('game_mode_persistent', DEFAULT_GAME_MODE)
+    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table, current_game_mode)
 
 # --- Display the data editor ---
 # Use data_editor with a key to capture changes
+column_config = {
+    "Gender": st.column_config.SelectboxColumn(
+        "Gender",
+        help="Player's gender",
+        options=["M", "F"],
+        default="M",
+        required=True,
+    ),
+    "Pre-Rating": st.column_config.NumberColumn(
+        "Pre-Rating",
+        help="Player's numerical rating (e.g., 1, 2, 4)",
+        default=2,
+        min_value=0,
+        step=1,
+        required=True,
+    ),
+}
+
+# Add Team Name column config only for Doubles mode
+if "Team Name" in st.session_state.editor_df.columns:
+    column_config["Team Name"] = st.column_config.TextColumn(
+        "Team Name",
+        help="Optional: Players with matching team names will be paired together throughout the session",
+        default="",
+    )
+
 edited_df = st.data_editor(
     st.session_state.editor_df,
-    column_config={
-        "Gender": st.column_config.SelectboxColumn(
-            "Gender",
-            help="Player's gender",
-            options=["M", "F"],
-            default="M",
-            required=True,
-        ),
-        "Pre-Rating": st.column_config.NumberColumn(
-            "Pre-Rating",
-            help="Player's numerical rating (e.g., 1, 2, 4)",
-            default=2,
-            min_value=0,
-            step=1,
-            required=True,
-        ),
-    },
+    column_config=column_config,
     disabled=["#"],
     hide_index=True,
     num_rows="dynamic",
@@ -210,21 +235,41 @@ if st.button("✅ Confirm Player List"):
     # Ensure Pre-Rating is numeric
     current_df["Pre-Rating"] = pd.to_numeric(current_df["Pre-Rating"], errors='coerce').fillna(0).astype(int)
     
-    final_players_table = {
-        row["Player Name"]: Player(
-            name=row["Player Name"],
-            gender=row["Gender"],
-            pre_rating=row["Pre-Rating"]
-        )
-        for _, row in current_df.iterrows()
-    }
+    # Handle Team Name column if present
+    if "Team Name" in current_df.columns:
+        current_df["Team Name"] = current_df["Team Name"].fillna("").astype(str)
+    
+    # Validate team names (each non-empty team name must have exactly 2 players)
+    validation_errors = []
+    if "Team Name" in current_df.columns:
+        team_counts = current_df[current_df["Team Name"] != ""]["Team Name"].value_counts()
+        for team_name, count in team_counts.items():
+            if count != 2:
+                validation_errors.append(f"Team '{team_name}' has {count} player(s), but each team must have exactly 2 players.")
+    
+    if validation_errors:
+        for error in validation_errors:
+            st.error(error)
+    else:
+        # Create player table with team names
+        final_players_table = {}
+        for _, row in current_df.iterrows():
+            player_data = {
+                "name": row["Player Name"],
+                "gender": row["Gender"],
+                "pre_rating": row["Pre-Rating"]
+            }
+            if "Team Name" in row:
+                player_data["team_name"] = row["Team Name"]
+            final_players_table[row["Player Name"]] = Player(**player_data)
 
-    # Update the master player list and the editor's DataFrame
-    st.session_state.player_table = final_players_table
-    st.session_state.editor_df = create_editor_dataframe(final_players_table)
-    st.session_state.show_success = True
+        # Update the master player list and the editor's DataFrame
+        st.session_state.player_table = final_players_table
+        current_game_mode = st.session_state.get('game_mode_persistent', DEFAULT_GAME_MODE)
+        st.session_state.editor_df = create_editor_dataframe(final_players_table, current_game_mode)
+        st.session_state.show_success = True
 
-    st.rerun()
+        st.rerun()
     
 # Show success message if flag is set
 if st.session_state.get('show_success', False):
@@ -287,8 +332,15 @@ game_mode = st.radio(
     horizontal=True
 )
 
-# Keep the persistent value in sync with the widget
-st.session_state.game_mode_persistent = game_mode
+# Detect game mode change and refresh editor
+if st.session_state.game_mode_persistent != game_mode:
+    st.session_state.game_mode_persistent = game_mode
+    # Refresh the editor dataframe to add/remove Team Name column
+    st.session_state.editor_df = create_editor_dataframe(st.session_state.player_table, game_mode)
+    st.rerun()
+else:
+    # Keep the persistent value in sync with the widget
+    st.session_state.game_mode_persistent = game_mode
 
 # Initialize persistent number of courts (survives session resets)
 if 'num_courts_persistent' not in st.session_state:

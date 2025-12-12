@@ -133,11 +133,13 @@ def generate_one_round(
     mf_power_penalty=0,
     players_per_court=4,
     weights=None,
-    game_mode="Doubles"
+    game_mode="Doubles",
+    teammate_pairs=None
 ):
     """
     Generates a single, optimized round of badminton matches.
     Supports both Doubles (4 players per court) and Singles (2 players per court).
+    teammate_pairs: List of (player1, player2) tuples that must be paired together.
     """
     player_ratings = {p.name: p.rating for p in players}
     player_genders = {p.name: p.gender for p in players}
@@ -182,9 +184,12 @@ def generate_one_round(
     )
     total_power_objective = pulp.lpSum(max_team_power[c] - min_team_power[c] for c in range(num_courts))
 
+    # Exclude locked pairs from pairing history penalty
+    locked_pairs_set = set(tuple(sorted(pair)) for pair in (teammate_pairs or []))
     total_pairing_objective = pulp.lpSum(
         t[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
         for pair in player_pairs for c in range(num_courts)
+        if tuple(sorted(pair)) not in locked_pairs_set
     )
 
     prob += (
@@ -206,6 +211,18 @@ def generate_one_round(
     for p in available_players:
         for c in range(num_courts):
             prob += pulp.lpSum(t[pair][c] for pair in player_pairs if p in pair) == x[p][c]
+
+    # Hard constraints for teammate pairs: force them to partner together if both are playing
+    if teammate_pairs:
+        locked_pairs = [tuple(sorted(pair)) for pair in teammate_pairs]
+        for p1, p2 in locked_pairs:
+            # Only enforce if both players are available (not resting)
+            if p1 in available_players and p2 in available_players:
+                for c in range(num_courts):
+                    # If p1 plays on court c, p2 must also play on court c
+                    prob += x[p2][c] == x[p1][c]
+                    # They must be partners on that court
+                    prob += t[(p1, p2)][c] == x[p1][c]
 
     max_possible_rating = max(player_ratings.values()) if player_ratings else 0
     max_possible_team_power = 2 * max_possible_rating

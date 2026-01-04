@@ -24,6 +24,11 @@ OPTIMIZER_RANK_MIN = 0.0
 OPTIMIZER_RANK_MAX = 5.0
 OPTIMIZER_SKILL_RANGE = OPTIMIZER_RANK_MAX - OPTIMIZER_RANK_MIN
 
+# Big-M constant for mixed-integer programming constraints
+# Used to relax constraints when a binary variable is 0 (off).
+# Must be significantly larger than any possible potential rating or power sum
+OPTIMIZER_BIG_M = 1000.0
+
 # =============================================================================
 # Gender Penalty Constants (relative to optimizer's 0-5 scale)
 #

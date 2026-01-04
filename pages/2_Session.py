@@ -6,14 +6,13 @@ This page displays the current round's matches and allows users to:
 - Select winners for each court
 - View current standings
 - Manage courts and players mid-session
-- Apply Glicko-2 rating updates
+- Match data is saved for TrueSkill Through Time rating updates
 """
 
 import pandas as pd
 import streamlit as st
 
 from database import MatchDB, PlayerDB, SessionDB
-from rating import Glicko2Rating, process_session_matches
 from session_logic import Player, SessionManager
 from app_types import Gender
 
@@ -245,9 +244,8 @@ with st.sidebar:
                     added = session.add_player(
                         name=p.name,
                         gender=p.gender,
-                        elo=p.elo,
-                        deviation=p.deviation,
-                        volatility=p.volatility,
+                        mu=p.mu,
+                        sigma=p.sigma,
                     )
                     if added:
                         SessionManager.save(session, session_name)
@@ -261,8 +259,12 @@ with st.sidebar:
             new_gender = st.selectbox(
                 "Gender", options=["M", "F"], key="mid_add_gender"
             )
-            new_elo = st.number_input(
-                "ELO", min_value=0, step=1, value=1500, key="mid_add_elo"
+            new_mu = st.number_input(
+                "Skill (Mu)",
+                min_value=0.0,
+                step=0.5,
+                value=25.0,
+                key="mid_add_mu",
             )
 
             new_team_name = ""
@@ -279,7 +281,7 @@ with st.sidebar:
                     guest_player = Player(
                         name=new_name.strip(),
                         gender=Gender(new_gender),
-                        elo=float(new_elo),
+                        mu=float(new_mu),
                         team_name=new_team_name.strip(),
                     )
 
@@ -287,7 +289,7 @@ with st.sidebar:
                     added = session.add_player(
                         name=guest_player.name,
                         gender=guest_player.gender,
-                        elo=guest_player.elo,
+                        mu=guest_player.mu,
                         team_name=guest_player.team_name,
                     )
 
@@ -344,74 +346,16 @@ with st.sidebar:
         session_id = st.session_state.get("current_session_id")
 
         if session_id:
-            st.caption("Apply Glicko-2 rating updates based on match results.")
+            st.caption("TrueSkill Through Time rating updates.")
+            st.info("⏳ TTT rating updates coming soon. Match data is being saved.")
 
-            if st.button(
-                "🎯 Apply Rating Updates",
-                key="apply_ratings_btn",
-                use_container_width=True,
-            ):
-                try:
-                    # Get unprocessed matches
-                    unprocessed = MatchDB.get_unprocessed_matches(session_id)
-
-                    if not unprocessed:
-                        st.info("No unprocessed matches found.")
-                    else:
-                        # Get current player ratings from database
-                        all_players = PlayerDB.get_all_players()
-
-                        # Process matches and get new ratings
-                        new_ratings = process_session_matches(
-                            matches=unprocessed,
-                            players=all_players,
-                            is_doubles=session.is_doubles,
-                        )
-
-                        # Update players with new ratings
-                        updated_players = {}
-                        rating_changes = []
-                        for name, new_rating in new_ratings.items():
-                            if name in all_players:
-                                player = all_players[name]
-                                old_elo = player.elo
-                                player.elo = new_rating.rating
-                                player.deviation = new_rating.rd
-                                player.volatility = new_rating.volatility
-                                updated_players[name] = player
-
-                                change = new_rating.rating - old_elo
-                                rating_changes.append((name, change))
-
-                        # Save to database
-                        PlayerDB.upsert_players(updated_players)
-
-                        # Mark matches as processed
-                        match_ids = [m["id"] for m in unprocessed]
-                        MatchDB.mark_matches_processed(match_ids)
-
-                        # Show results
-                        st.success(
-                            f"Updated ratings for {len(updated_players)} players!"
-                        )
-
-                        # Show rating changes summary
-                        rating_changes.sort(key=lambda x: x[1], reverse=True)
-                        changes_text = []
-                        for name, change in rating_changes:
-                            if change >= 0:
-                                changes_text.append(f"**{name}**: +{change:.1f}")
-                            else:
-                                changes_text.append(f"**{name}**: {change:.1f}")
-
-                        if changes_text:
-                            st.markdown("**Rating Changes:**")
-                            st.markdown(" | ".join(changes_text[:6]))  # Show top 6
-                            if len(changes_text) > 6:
-                                st.caption(f"...and {len(changes_text) - 6} more")
-
-                except Exception as e:
-                    st.error(f"Failed to update ratings: {e}")
+            # Show match count
+            try:
+                unprocessed = MatchDB.get_unprocessed_matches(session_id)
+                if unprocessed:
+                    st.metric("Unprocessed Matches", len(unprocessed))
+            except Exception as e:
+                st.caption(f"Could not fetch match count: {e}")
         else:
             st.warning("Session not connected to cloud. Rating updates unavailable.")
 

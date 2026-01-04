@@ -2,4 +2,4 @@
 trigger: always_on
 ---
 
-The README file for the TrueSkillThroughTime library is located at ./design/TrueSkillThroughTime_README.md. There are also a few examples in ./examples directory.
+Documentation for the TrueSkillThroughTime library is provided in ./TrueSkillThroughTime.py/README.md and ./TrueSkillThroughTime.py/RELEASE.md. Example usage can be found in the ./TrueSkillThroughTime.py/examples/ directory.

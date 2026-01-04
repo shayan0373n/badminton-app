@@ -9,9 +9,8 @@ import streamlit as st
 from supabase import create_client, Client
 
 from constants import (
-    GLICKO2_DEFAULT_RATING,
-    GLICKO2_DEFAULT_RD,
-    GLICKO2_DEFAULT_VOLATILITY,
+    TTT_DEFAULT_MU,
+    TTT_DEFAULT_SIGMA,
 )
 from exceptions import DatabaseError
 from session_logic import Player
@@ -44,9 +43,8 @@ class PlayerDB:
             players[row["name"]] = Player(
                 name=row["name"],
                 gender=Gender(row["gender"]),
-                elo=row.get("elo", GLICKO2_DEFAULT_RATING),
-                deviation=row.get("deviation", GLICKO2_DEFAULT_RD),
-                volatility=row.get("volatility", GLICKO2_DEFAULT_VOLATILITY),
+                mu=row.get("mu", TTT_DEFAULT_MU),
+                sigma=row.get("sigma", TTT_DEFAULT_SIGMA),
                 database_id=row.get("id"),  # Store the Supabase row ID
             )
         return players
@@ -68,9 +66,8 @@ class PlayerDB:
             player_data = {
                 "name": p.name,
                 "gender": p.gender,
-                "elo": p.elo,
-                "deviation": p.deviation,
-                "volatility": p.volatility,
+                "mu": p.mu,
+                "sigma": p.sigma,
             }
             # Include the database ID if present for proper update matching
             if p.database_id is not None:

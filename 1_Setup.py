@@ -127,11 +127,12 @@ def validate_session_setup(
     """Validates player list and court count. Returns (is_valid, error_message)."""
     if len(player_ids) != len(set(player_ids)):
         return False, "Error: Duplicate names found in the player list."
-    elif not player_ids:
+
+    if not player_ids:
         return False, "Please add players to the list before starting."
-    else:
-        # Allow starting even if there are more courts than players; extra courts will sit idle
-        return True, None
+
+    # Allow starting even if there are more courts than players; extra courts will sit idle
+    return True, None
 
 
 def start_session(
@@ -209,14 +210,37 @@ if existing_sessions:
 st.header("Session Setup")
 
 # Initialize master registry if not exists
-if "master_registry" not in st.session_state:
+# Initialize master registry if not exists or requested to update
+should_refresh_players = st.session_state.get("player_table_updated", False)
+
+if "master_registry" not in st.session_state or should_refresh_players:
     try:
         st.session_state.master_registry = PlayerDB.get_all_players()
     except Exception as e:
         st.warning(f"Could not connect to Supabase: {e}")
-        st.session_state.master_registry = {}
+        if "master_registry" not in st.session_state:
+            st.session_state.master_registry = {}
 
-tab1, tab2 = st.tabs(["👥 Tonight's Players", "🗃️ Member Registry"])
+# Sync session_player_selection if needed (re-sync from player_table when returning from session)
+# Ensure persistent state exists
+if "session_player_selection" not in st.session_state:
+    st.session_state.session_player_selection = []
+
+# Handle restoration from session termination
+if should_refresh_players and "player_table" in st.session_state:
+    # Filter to ensure we only select players currently in the registry
+    valid_keys = [
+        k
+        for k in st.session_state.player_table.keys()
+        if k in st.session_state.master_registry
+    ]
+    st.session_state.session_player_selection = valid_keys
+
+# Now satisfied, delete the flag
+if "player_table_updated" in st.session_state:
+    del st.session_state["player_table_updated"]
+
+tab1, tab2 = st.tabs(["👥 Session Players", "🗃️ Member Registry"])
 
 with tab2:
     st.subheader("Manage Member Registry")
@@ -285,15 +309,15 @@ with tab2:
             st.error(f"Failed to save registry: {e}")
 
 with tab1:
-    st.subheader("Select Players for Tonight")
+    st.subheader("Select Session Players")
 
     all_member_names = sorted(list(st.session_state.master_registry.keys()))
 
-    # Use multiselect to pick from registry
+    # Use multiselect to pick from registry with stable key-based state
     selected_names = st.multiselect(
-        "Who is playing tonight?",
+        "Who is playing in this session?",
         options=all_member_names,
-        default=[],
+        key="session_player_selection",
         help="Start typing to search for existing members",
     )
 
@@ -311,7 +335,7 @@ with tab1:
         if st.session_state.get("is_doubles_persistent", DEFAULT_IS_DOUBLES):
             st.write("### (Optional) Pair Fixed Teams")
             st.caption(
-                "Enter a matching name for two players to keep them together tonight."
+                "Enter a matching name for two players to keep them together in this session."
             )
 
             # Simple editor for team names only for selected players

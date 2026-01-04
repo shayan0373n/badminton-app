@@ -54,14 +54,17 @@ class PlayerDB:
         """
         Upserts a dictionary of Player objects into the Supabase 'players' table.
 
-        Uses the database_id (if present) to update existing rows. This allows
-        editing player names without creating duplicate entries.
+        New players (without database_id) are inserted, allowing the database
+        to auto-generate their ID. Existing players (with database_id) are
+        updated using their known ID.
 
         Args:
             players_dict: A dictionary mapping player names to Player objects.
         """
         supabase = get_supabase_client()
-        data = []
+        new_players = []
+        existing_players = []
+
         for p in players_dict.values():
             player_data = {
                 "name": p.name,
@@ -69,14 +72,23 @@ class PlayerDB:
                 "mu": p.mu,
                 "sigma": p.sigma,
             }
-            # Include the database ID if present for proper update matching
             if p.database_id is not None:
+                # Existing player - include ID for update
                 player_data["id"] = p.database_id
-            data.append(player_data)
+                existing_players.append(player_data)
+            else:
+                # New player - let database auto-generate ID
+                new_players.append(player_data)
 
-        if data:
-            # Use on_conflict="id" to update existing rows by their primary key
-            supabase.table("players").upsert(data, on_conflict="id").execute()
+        # Upsert new players by name (handles re-adding existing players gracefully)
+        if new_players:
+            supabase.table("players").upsert(new_players, on_conflict="name").execute()
+
+        # Update existing players by their primary key
+        if existing_players:
+            supabase.table("players").upsert(
+                existing_players, on_conflict="id"
+            ).execute()
 
 
 class SessionDB:

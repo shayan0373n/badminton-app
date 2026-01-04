@@ -1,6 +1,7 @@
 streamlit
 numpy
+pandas
 pulp
 gurobipy
 supabase
-
+trueskillthroughtime

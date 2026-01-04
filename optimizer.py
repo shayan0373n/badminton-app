@@ -13,7 +13,7 @@ import random
 
 import pulp
 
-from constants import OPTIMIZER_RANK_MIN, OPTIMIZER_RANK_MAX
+from constants import OPTIMIZER_RANK_MIN, OPTIMIZER_RANK_MAX, OPTIMIZER_BIG_M
 from logger import log_optimizer_debug
 from app_types import (
     MatchList,
@@ -128,10 +128,12 @@ def generate_singles_round(
     # Skill balance constraints
     for c in range(num_courts):
         for p in available_players:
-            prob += max_rating_on_court[c] >= normalized_adjusted[p] * x[p][c]
-            prob += min_rating_on_court[c] <= normalized_adjusted[p] * x[p][
-                c
-            ] + OPTIMIZER_RANK_MAX * (1 - x[p][c])
+            prob += max_rating_on_court[c] >= normalized_adjusted[
+                p
+            ] - OPTIMIZER_BIG_M * (1 - x[p][c])
+            prob += min_rating_on_court[c] <= normalized_adjusted[
+                p
+            ] + OPTIMIZER_BIG_M * (1 - x[p][c])
 
     # Solve
     solver = pulp.GUROBI(msg=False, timeLimit=10)
@@ -320,14 +322,17 @@ def generate_one_round(
                     # They must be partners on that court
                     prob += t[(p1, p2)][c] == x[p1][c]
 
-    max_possible_team_power = 2 * OPTIMIZER_RANK_MAX
-
     for c in range(num_courts):
         for p in available_players:
-            prob += max_rating_on_court[c] >= player_ratings[p] * x[p][c]
-            prob += min_rating_on_court[c] <= player_ratings[p] * x[p][
-                c
-            ] + OPTIMIZER_RANK_MAX * (1 - x[p][c])
+            # Robust Big-M constraints for ratings
+            # If x=1: max >= rating. If x=0: max >= rating - OPTIMIZER_BIG_M (trivially true)
+            prob += max_rating_on_court[c] >= player_ratings[p] - OPTIMIZER_BIG_M * (
+                1 - x[p][c]
+            )
+            # If x=1: min <= rating. If x=0: min <= rating + OPTIMIZER_BIG_M (trivially true)
+            prob += min_rating_on_court[c] <= player_ratings[p] + OPTIMIZER_BIG_M * (
+                1 - x[p][c]
+            )
 
         for p1, p2 in player_pairs:
             pair_power = player_ratings[p1] + player_ratings[p2]
@@ -343,10 +348,14 @@ def generate_one_round(
                 Gender.FEMALE,
             }:
                 pair_power += mixed_gender_team_penalty
-            prob += max_team_power[c] >= pair_power * t[(p1, p2)][c]
-            prob += min_team_power[c] <= pair_power * t[(p1, p2)][
-                c
-            ] + max_possible_team_power * (1 - t[(p1, p2)][c])
+
+            # Robust Big-M constraints for team power
+            prob += max_team_power[c] >= pair_power - OPTIMIZER_BIG_M * (
+                1 - t[(p1, p2)][c]
+            )
+            prob += min_team_power[c] <= pair_power + OPTIMIZER_BIG_M * (
+                1 - t[(p1, p2)][c]
+            )
 
     # Use the Gurobi solver with a 10s time limit.
     solver = pulp.GUROBI(

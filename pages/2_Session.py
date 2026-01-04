@@ -249,7 +249,7 @@ with st.sidebar:
                     )
                     if added:
                         SessionManager.save(session, session_name)
-                        st.success(f"Added {selected_reg_name} to tonight's session!")
+                        st.success(f"Added {selected_reg_name} to the session!")
                         st.rerun()
                 else:
                     st.warning("Please select a member.")

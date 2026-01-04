@@ -14,12 +14,13 @@ from dataclasses import dataclass
 
 from constants import (
     DEFAULT_IS_DOUBLES,
-    GLICKO2_DEFAULT_RATING,
-    GLICKO2_DEFAULT_RD,
-    GLICKO2_DEFAULT_VOLATILITY,
     OPTIMIZER_SKILL_RANGE,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
+    TTT_DEFAULT_MU,
+    TTT_DEFAULT_SIGMA,
+    TTT_MU_BAD,
+    TTT_MU_GOOD,
 )
 from exceptions import SessionError
 from optimizer import generate_one_round
@@ -32,13 +33,12 @@ SESSIONS_DIR = "sessions"
 
 @dataclass
 class Player:
-    """Represents a player with their rating information and session-specific earned score."""
+    """Represents a player with their TrueSkill Through Time rating and session-specific score."""
 
     name: str
     gender: Gender
-    elo: float = GLICKO2_DEFAULT_RATING
-    deviation: float = GLICKO2_DEFAULT_RD
-    volatility: float = GLICKO2_DEFAULT_VOLATILITY
+    mu: float = TTT_DEFAULT_MU  # TTT mean skill estimate
+    sigma: float = TTT_DEFAULT_SIGMA  # TTT uncertainty (standard deviation)
     team_name: str = ""  # Optional team name for permanent pairing
     earned_rating: float = 0.0  # Keeping this for session-specific standings
     database_id: int | None = None  # Supabase row ID for updates
@@ -46,7 +46,7 @@ class Player:
     @property
     def rating(self) -> float:
         """Compatibility property for existing code that expects .rating"""
-        return self.elo
+        return self.mu
 
     def add_rating(self, amount: float) -> None:
         """Adds rating to the player (session-specific score)."""
@@ -230,19 +230,14 @@ class ClubNightSession:
         original_ratings = {p.name: p.rating for p in self.player_pool.values()}
         player_genders = {p.name: p.gender for p in self.player_pool.values()}
 
-        raw_vals = list(original_ratings.values())
-        normalized_ratings = {}
-        if raw_vals:
-            min_r, max_r = min(raw_vals), max(raw_vals)
-            if max_r > min_r:
-                normalized_ratings = {
-                    n: (r - min_r) / (max_r - min_r) * OPTIMIZER_SKILL_RANGE
-                    for n, r in original_ratings.items()
-                }
-            else:
-                normalized_ratings = {
-                    n: OPTIMIZER_SKILL_RANGE / 2.0 for n in original_ratings.keys()
-                }
+        # Normalize using fixed anchors for consistency across sessions
+        # A player with TTT_MU_BAD (18) maps to 0, TTT_MU_GOOD (32) maps to 5
+        # Values outside this range extrapolate (e.g., mu=39 -> 7.5)
+        rating_range = TTT_MU_GOOD - TTT_MU_BAD
+        normalized_ratings = {
+            n: (r - TTT_MU_BAD) / rating_range * OPTIMIZER_SKILL_RANGE
+            for n, r in original_ratings.items()
+        }
 
         # 2. Call the purified optimizer
         result = generate_one_round(
@@ -338,9 +333,8 @@ class ClubNightSession:
         self,
         name: str,
         gender: Gender,
-        elo: float = GLICKO2_DEFAULT_RATING,
-        deviation: float = GLICKO2_DEFAULT_RD,
-        volatility: float = GLICKO2_DEFAULT_VOLATILITY,
+        mu: float = TTT_DEFAULT_MU,
+        sigma: float = TTT_DEFAULT_SIGMA,
         team_name: str = "",
     ) -> bool:
         """
@@ -353,9 +347,8 @@ class ClubNightSession:
         Args:
             name: Player's name (must be unique)
             gender: Gender.MALE ('M') or Gender.FEMALE ('F')
-            elo: Initial ELO rating
-            deviation: Glicko-2 rating deviation
-            volatility: Glicko-2 volatility
+            mu: TTT mean skill estimate
+            sigma: TTT uncertainty (standard deviation)
             team_name: Optional team name for permanent pairing
 
         Returns:
@@ -369,9 +362,8 @@ class ClubNightSession:
         new_player = Player(
             name=name,
             gender=gender,
-            elo=elo,
-            deviation=deviation,
-            volatility=volatility,
+            mu=mu,
+            sigma=sigma,
             team_name=team_name,
         )
 

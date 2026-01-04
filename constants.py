@@ -52,11 +52,21 @@ DEFAULT_WEIGHTS = {
 }
 
 # =============================================================================
-# Glicko-2 Rating System Constants
+# TrueSkill Through Time Rating System Constants
 # =============================================================================
-GLICKO2_TAU = 0.5  # System volatility constraint (typically 0.3-1.2)
-GLICKO2_EPSILON = 0.000001  # Convergence tolerance
-GLICKO2_DEFAULT_RATING = 1500.0
-GLICKO2_DEFAULT_RD = 350.0
-GLICKO2_DEFAULT_VOLATILITY = 0.06
-GLICKO2_SCALE = 173.7178  # Scaling factor (400/ln(10))
+# Skill levels (mu) - spread calibrated for ~99% win rate (good vs bad)
+TTT_MU_GOOD = 32.0
+TTT_MU_AVERAGE = 25.0
+TTT_MU_BAD = 18.0
+
+# Uncertainty levels (sigma)
+TTT_SIGMA_CERTAIN = 2.5  # Well-known player
+TTT_SIGMA_UNCERTAIN = 6.0  # New or rarely-seen player
+
+# Default values for new players
+TTT_DEFAULT_MU = TTT_MU_AVERAGE
+TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
+
+# Game dynamics
+TTT_BETA = 4.0  # Performance variance (higher = more randomness)
+TTT_GAMMA = 0.01  # Skill drift per time unit (weekly sessions)

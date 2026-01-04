@@ -39,7 +39,8 @@ from constants import (
     DEFAULT_PENALTY_FEMALE_SINGLES,
     DEFAULT_PENALTY_MIXED_GENDER_TEAM,
     DEFAULT_WEIGHTS,
-    GLICKO2_DEFAULT_RATING,
+    TTT_DEFAULT_MU,
+    TTT_DEFAULT_SIGMA,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
 )
@@ -49,7 +50,7 @@ from app_types import Gender
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
-    f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, elo=GLICKO2_DEFAULT_RATING)
+    f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, mu=TTT_DEFAULT_MU)
     for i in range(1, 11)
 }
 
@@ -107,9 +108,8 @@ def create_editor_dataframe(
         "#": player_ranks,
         "Player Name": [p.name for p in player_table.values()],
         "Gender": [p.gender for p in player_table.values()],
-        "ELO": [p.elo for p in player_table.values()],
-        "Deviation": [p.deviation for p in player_table.values()],
-        "Volatility": [p.volatility for p in player_table.values()],
+        "Mu": [p.mu for p in player_table.values()],
+        "Sigma": [p.sigma for p in player_table.values()],
         "database_id": [p.database_id for p in player_table.values()],  # Track DB ID
     }
     # Only add Team Name column for Doubles mode
@@ -230,14 +230,18 @@ with tab2:
         "Gender": st.column_config.SelectboxColumn(
             "Gender", options=["M", "F"], default="M", required=True
         ),
-        "ELO": st.column_config.NumberColumn(
-            "ELO", help="Current ELO", default=1500, min_value=0, step=1, required=True
+        "Mu": st.column_config.NumberColumn(
+            "Mu",
+            help="TTT mean skill (25 = average)",
+            default=25.0,
+            step=0.5,
+            required=True,
         ),
-        "Deviation": st.column_config.NumberColumn(
-            "Deviation", help="Glicko-2 Deviation", default=350.0, step=0.1
-        ),
-        "Volatility": st.column_config.NumberColumn(
-            "Volatility", help="Glicko-2 Volatility", default=0.06, format="%.4f"
+        "Sigma": st.column_config.NumberColumn(
+            "Sigma",
+            help="TTT uncertainty (lower = more certain)",
+            default=6.0,
+            step=0.5,
         ),
         "database_id": None,  # Hide from user - internal tracking only
     }
@@ -267,9 +271,8 @@ with tab2:
             new_registry[row["Player Name"]] = Player(
                 name=row["Player Name"],
                 gender=Gender(row["Gender"]),
-                elo=float(row["ELO"]),
-                deviation=float(row.get("Deviation", 350.0)),
-                volatility=float(row.get("Volatility", 0.06)),
+                mu=float(row["Mu"]),
+                sigma=float(row.get("Sigma", 6.0)),
                 database_id=db_id,  # Preserve DB ID for proper updates
             )
 

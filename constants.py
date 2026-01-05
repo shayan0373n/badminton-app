@@ -4,6 +4,8 @@ Centralized constants for the Badminton App.
 This module contains all configuration constants used throughout the application.
 """
 
+from datetime import datetime
+
 # =============================================================================
 # Game Mode Constants
 # =============================================================================
@@ -74,4 +76,15 @@ TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
 
 # Game dynamics
 TTT_BETA = 4.0  # Performance variance (higher = more randomness)
-TTT_GAMMA = 0.01  # Skill drift per time unit (weekly sessions)
+TTT_GAMMA = 10.0  # Skill drift per day (~0.5 sigma growth per 30 inactive days)
+
+# =============================================================================
+# Time & Timestamp Constants
+# =============================================================================
+TTT_REFERENCE_DATE = datetime(2026, 1, 1)
+
+# =============================================================================
+# Page Navigation Constants
+# =============================================================================
+PAGE_SETUP = "1_Setup.py"
+PAGE_SESSION = "2_Session.py"

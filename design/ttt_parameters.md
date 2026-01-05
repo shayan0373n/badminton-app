@@ -10,7 +10,7 @@
 | **sigma_certain** | 2.5 | Uncertainty for well-known players |
 | **sigma_uncertain** | 6.0 | Uncertainty for new/rarely-seen players |
 | **beta** | 4.0 | Performance variance per game |
-| **gamma** | 0.01 | Skill drift per time unit (weekly sessions) |
+| **gamma** | 0.1 | Skill drift per day (~0.5 sigma growth per 30 inactive days) |
 
 ## Player Prior Matrix
 
@@ -33,7 +33,7 @@
 - **mu**: Mean skill estimate (higher = better player)
 - **sigma**: Uncertainty in skill estimate (higher = less certain)
 - **beta**: Game randomness (lower = skill-dominant, higher = more upsets)
-- **gamma**: How much sigma grows between time units (0 = no drift)
+- **gamma**: How much sigma grows per day of inactivity (0 = no drift)
 
 ## Display Rating
 
@@ -42,5 +42,5 @@ Conservative rating for display: `mu - 3×sigma`
 ## Notes
 
 - Library: `trueskillthroughtime` v2.0.0 (cloned from GitHub)
-- Time unit: Weekly sessions
+- Time unit: Days
 - Spread of 14 points between skill levels calibrated for ~99% win rate (good vs bad)

@@ -359,7 +359,8 @@ with tab1:
         if st.session_state.get("is_doubles_persistent", DEFAULT_IS_DOUBLES):
             st.write("### (Optional) Pair Fixed Teams")
             st.caption(
-                "Enter a matching name for two players to keep them together in this session."
+                "Players with matching team names will always partner together. "
+                "Use comma-separated names for multiple memberships (e.g., 'TeamA, TeamB')."
             )
 
             # Simple editor for team names only for selected players

@@ -150,11 +150,13 @@ class ClubNightSession:
         female_singles_penalty: float = 0,
         is_doubles: bool = True,
         database_id: int | None = None,
+        is_recorded: bool = True,
     ) -> None:
         self.player_pool = players
         self.num_courts = num_courts
         self.database_id = database_id
         self.is_doubles = is_doubles
+        self.is_recorded = is_recorded
         self.players_per_court = (
             PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
         )
@@ -347,6 +349,7 @@ class ClubNightSession:
             "player_pool": self.player_pool,
             "num_courts": self.num_courts,
             "is_doubles": self.is_doubles,
+            "is_recorded": self.is_recorded,
             "weights": self.weights.copy(),
             "female_female_team_penalty": self.female_female_team_penalty,
             "mixed_gender_team_penalty": self.mixed_gender_team_penalty,

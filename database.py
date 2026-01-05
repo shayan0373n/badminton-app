@@ -11,10 +11,7 @@ import logging
 import streamlit as st
 from supabase import create_client, Client
 
-from constants import (
-    TTT_DEFAULT_MU,
-    TTT_DEFAULT_SIGMA,
-)
+
 from exceptions import DatabaseError
 from session_logic import Player
 from app_types import Gender
@@ -56,11 +53,11 @@ class PlayerDB:
             players[row["name"]] = Player(
                 name=row["name"],
                 gender=Gender(row["gender"]),
-                prior_mu=row.get("prior_mu", TTT_DEFAULT_MU),
-                prior_sigma=row.get("prior_sigma", TTT_DEFAULT_SIGMA),
-                mu=row.get("mu", TTT_DEFAULT_MU),
-                sigma=row.get("sigma", TTT_DEFAULT_SIGMA),
-                database_id=row.get("id"),
+                prior_mu=row["prior_mu"],
+                prior_sigma=row["prior_sigma"],
+                mu=row["mu"],
+                sigma=row["sigma"],
+                database_id=row["id"],
             )
         return players
 

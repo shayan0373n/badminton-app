@@ -39,10 +39,11 @@ from constants import (
     DEFAULT_PENALTY_FEMALE_SINGLES,
     DEFAULT_PENALTY_MIXED_GENDER_TEAM,
     DEFAULT_WEIGHTS,
-    TTT_DEFAULT_MU,
-    TTT_DEFAULT_SIGMA,
+    PAGE_SESSION,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
+    TTT_DEFAULT_MU,
+    TTT_DEFAULT_SIGMA,
 )
 from database import PlayerDB, SessionDB
 from session_logic import ClubNightSession, SessionManager, Player
@@ -108,8 +109,10 @@ def create_editor_dataframe(
         "#": player_ranks,
         "Player Name": [p.name for p in player_table.values()],
         "Gender": [p.gender for p in player_table.values()],
+        "Prior Mu": [p.prior_mu for p in player_table.values()],
         "Mu": [p.mu for p in player_table.values()],
         "Sigma": [p.sigma for p in player_table.values()],
+        "Rating": [p.conservative_rating for p in player_table.values()],
         "database_id": [p.database_id for p in player_table.values()],  # Track DB ID
     }
     # Only add Team Name column for Doubles mode
@@ -145,10 +148,22 @@ def start_session(
     session_name: str,
     is_doubles: bool,
 ) -> None:
-    """Creates and starts a new badminton session."""
+    """Creates and starts a new badminton session.
+
+    Raises:
+        Stops execution via st.stop() if database session cannot be created.
+    """
+    # Create session record in Supabase FIRST (fail-fast)
+    try:
+        database_id = SessionDB.create_session(session_name, is_doubles)
+    except Exception as e:
+        st.error(f"Could not create session in database: {e}")
+        st.stop()
+
     session = ClubNightSession(
         players=player_table,
         num_courts=num_courts,
+        database_id=database_id,
         weights=weights,
         female_female_team_penalty=female_female_team_penalty,
         mixed_gender_team_penalty=mixed_gender_team_penalty,
@@ -157,19 +172,11 @@ def start_session(
     )
     session.prepare_round()
 
-    # Create session record in Supabase
-    try:
-        session_id = SessionDB.create_session(session_name, is_doubles)
-        st.session_state.current_session_id = session_id
-    except Exception as e:
-        st.warning(f"Could not save session to cloud: {e}")
-        st.session_state.current_session_id = None
-
     SessionManager.save(session, session_name)
     st.session_state.session = session
     st.session_state.current_session_name = session_name
 
-    st.switch_page("pages/2_Session.py")
+    st.switch_page(f"pages/{PAGE_SESSION}")
 
 
 st.set_page_config(layout="wide", page_title="Badminton Setup")
@@ -187,20 +194,16 @@ if existing_sessions:
             with col1:
                 st.markdown(f"### {session_name}")
             with col2:
-                if st.button(
-                    "▶️ Resume", key=f"resume_{session_name}", use_container_width=True
-                ):
+                if st.button("▶️ Resume", key=f"resume_{session_name}", width="stretch"):
                     session = SessionManager.load(session_name)
                     if session:
                         st.session_state.session = session
                         st.session_state.current_session_name = session_name
-                        st.switch_page("pages/2_Session.py")
+                        st.switch_page(f"pages/{PAGE_SESSION}")
                     else:
                         st.error(f"Failed to load session '{session_name}'")
             with col3:
-                if st.button(
-                    "🗑️ Delete", key=f"delete_{session_name}", use_container_width=True
-                ):
+                if st.button("🗑️ Delete", key=f"delete_{session_name}", width="stretch"):
                     SessionManager.clear(session_name)
                     st.rerun()
 
@@ -254,18 +257,30 @@ with tab2:
         "Gender": st.column_config.SelectboxColumn(
             "Gender", options=["M", "F"], default="M", required=True
         ),
+        "Prior Mu": st.column_config.NumberColumn(
+            "Prior Mu",
+            help="Initial skill estimate (18=weak, 25=avg, 32=strong). Edit this!",
+            default=TTT_DEFAULT_MU,
+            min_value=10.0,
+            max_value=40.0,
+            step=1.0,
+            format="%.1f",
+            required=True,
+        ),
         "Mu": st.column_config.NumberColumn(
             "Mu",
-            help="TTT mean skill (25 = average)",
-            default=25.0,
-            step=0.5,
-            required=True,
+            help="Current skill (computed by TTT from match history)",
+            format="%.1f",
         ),
         "Sigma": st.column_config.NumberColumn(
             "Sigma",
-            help="TTT uncertainty (lower = more certain)",
-            default=6.0,
-            step=0.5,
+            help="Uncertainty (computed by TTT)",
+            format="%.2f",
+        ),
+        "Rating": st.column_config.NumberColumn(
+            "Rating",
+            help="Conservative skill rating (mu - 3*sigma)",
+            format="%.1f",
         ),
         "database_id": None,  # Hide from user - internal tracking only
     }
@@ -273,10 +288,16 @@ with tab2:
     edited_reg_df = st.data_editor(
         registry_df,
         column_config=reg_column_config,
-        disabled=["#", "database_id"],  # Prevent editing database_id
+        disabled=[
+            "#",
+            "Mu",
+            "Sigma",
+            "Rating",
+            "database_id",
+        ],  # Only Prior Mu is editable (besides Name/Gender)
         hide_index=True,
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key="registry_editor",
     )
 
@@ -295,8 +316,10 @@ with tab2:
             new_registry[row["Player Name"]] = Player(
                 name=row["Player Name"],
                 gender=Gender(row["Gender"]),
+                prior_mu=float(row.get("Prior Mu", TTT_DEFAULT_MU)),
+                prior_sigma=TTT_DEFAULT_SIGMA,  # Fixed for now
                 mu=float(row["Mu"]),
-                sigma=float(row.get("Sigma", 6.0)),
+                sigma=float(row.get("Sigma", TTT_DEFAULT_SIGMA)),
                 database_id=db_id,  # Preserve DB ID for proper updates
             )
 
@@ -350,7 +373,7 @@ with tab1:
             edited_teams = st.data_editor(
                 temp_team_df,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 key="session_team_editor",
             )
 

@@ -37,16 +37,37 @@ class Player:
 
     name: str
     gender: Gender
-    mu: float = TTT_DEFAULT_MU  # TTT mean skill estimate
-    sigma: float = TTT_DEFAULT_SIGMA  # TTT uncertainty (standard deviation)
+    # TTT priors (input to TTT - set manually based on perceived skill level)
+    prior_mu: float = TTT_DEFAULT_MU
+    prior_sigma: float = TTT_DEFAULT_SIGMA
+    # TTT posteriors (output from TTT - computed from match history)
+    # Default to None so __post_init__ can set them to prior values
+    mu: float | None = None  # TTT mean skill estimate
+    sigma: float | None = None  # TTT uncertainty (standard deviation)
     team_name: str = ""  # Optional team name for permanent pairing
     earned_rating: float = 0.0  # Keeping this for session-specific standings
     database_id: int | None = None  # Supabase row ID for updates
+
+    def __post_init__(self) -> None:
+        """Initialize mu/sigma to prior values when not explicitly provided."""
+        if self.mu is None:
+            self.mu = self.prior_mu
+        if self.sigma is None:
+            self.sigma = self.prior_sigma
 
     @property
     def rating(self) -> float:
         """Compatibility property for existing code that expects .rating"""
         return self.mu
+
+    @property
+    def conservative_rating(self) -> float:
+        """Conservative skill estimate (mu - 3*sigma).
+
+        This is a lower-bound estimate of a player's skill, commonly used
+        for ranking since it accounts for uncertainty in the rating.
+        """
+        return self.mu - 3 * self.sigma
 
     def add_rating(self, amount: float) -> None:
         """Adds rating to the player (session-specific score)."""
@@ -128,21 +149,23 @@ class ClubNightSession:
         mixed_gender_team_penalty: float = 0,
         female_singles_penalty: float = 0,
         is_doubles: bool = True,
+        database_id: int | None = None,
     ) -> None:
-        self.player_pool: dict[str, Player] = players
-        self.num_courts: int = num_courts
-        self.is_doubles: bool = is_doubles
-        self.players_per_court: int = (
+        self.player_pool = players
+        self.num_courts = num_courts
+        self.database_id = database_id
+        self.is_doubles = is_doubles
+        self.players_per_court = (
             PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
         )
-        self.round_num: int = 0
-        self.female_female_team_penalty: float = female_female_team_penalty
-        self.mixed_gender_team_penalty: float = mixed_gender_team_penalty
-        self.female_singles_penalty: float = female_singles_penalty
+        self.round_num = 0
+        self.female_female_team_penalty = female_female_team_penalty
+        self.mixed_gender_team_penalty = mixed_gender_team_penalty
+        self.female_singles_penalty = female_singles_penalty
 
         # State required for the optimizer
         self.historical_partners: PartnerHistory = defaultdict(int)
-        self.weights: dict[str, float] = (
+        self.weights = (
             weights
             if weights is not None
             else {"skill": 1.0, "power": 1.0, "pairing": 1.0}
@@ -259,20 +282,6 @@ class ClubNightSession:
             return
 
         matches = result.matches
-        # 3. Restore original Elo-based power ratings for the matches list
-        for m in matches:
-            if self.is_doubles:
-                m["team_1_power"] = (
-                    original_ratings[m["team_1"][0]] + original_ratings[m["team_1"][1]]
-                )
-                m["team_2_power"] = (
-                    original_ratings[m["team_2"][0]] + original_ratings[m["team_2"][1]]
-                )
-                m["power_diff"] = abs(m["team_1_power"] - m["team_2_power"])
-            else:  # Singles
-                m["player_1_rating"] = original_ratings[m["player_1"]]
-                m["player_2_rating"] = original_ratings[m["player_2"]]
-                m["rating_diff"] = abs(m["player_1_rating"] - m["player_2_rating"])
 
         # 4. Update state
         self.historical_partners = result.partner_history
@@ -328,6 +337,21 @@ class ClubNightSession:
         """Returns the current player ratings, sorted from highest to lowest."""
         standings = [(p.name, p.earned_rating) for p in self.player_pool.values()]
         return sorted(standings, key=lambda item: item[1], reverse=True)
+
+    def get_persistent_state(self) -> dict:
+        """Returns session parameters to preserve across session termination.
+
+        This allows the next session to start with the same configuration.
+        """
+        return {
+            "player_pool": self.player_pool,
+            "num_courts": self.num_courts,
+            "is_doubles": self.is_doubles,
+            "weights": self.weights.copy(),
+            "female_female_team_penalty": self.female_female_team_penalty,
+            "mixed_gender_team_penalty": self.mixed_gender_team_penalty,
+            "female_singles_penalty": self.female_singles_penalty,
+        }
 
     def add_player(
         self,

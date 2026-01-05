@@ -3,7 +3,10 @@
 Database operations for the Badminton App.
 
 This module handles all Supabase database interactions for players, sessions, and matches.
+All methods translate Supabase exceptions to DatabaseError for consistent error handling.
 """
+
+import logging
 
 import streamlit as st
 from supabase import create_client, Client
@@ -15,6 +18,8 @@ from constants import (
 from exceptions import DatabaseError
 from session_logic import Player
 from app_types import Gender
+
+logger = logging.getLogger("app.database")
 
 
 # Initialize Supabase client
@@ -34,34 +39,44 @@ class PlayerDB:
 
         Returns:
             Dict mapping player names to Player objects.
+
+        Raises:
+            DatabaseError: If the query fails.
         """
-        supabase = get_supabase_client()
-        response = supabase.table("players").select("*").execute()
+
+        try:
+            supabase = get_supabase_client()
+            response = supabase.table("players").select("*").execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: get_all_players")
+            raise DatabaseError("Failed to fetch players from database") from e
 
         players: dict[str, Player] = {}
         for row in response.data:
             players[row["name"]] = Player(
                 name=row["name"],
                 gender=Gender(row["gender"]),
+                prior_mu=row.get("prior_mu", TTT_DEFAULT_MU),
+                prior_sigma=row.get("prior_sigma", TTT_DEFAULT_SIGMA),
                 mu=row.get("mu", TTT_DEFAULT_MU),
                 sigma=row.get("sigma", TTT_DEFAULT_SIGMA),
-                database_id=row.get("id"),  # Store the Supabase row ID
+                database_id=row.get("id"),
             )
         return players
 
     @staticmethod
     def upsert_players(players_dict: dict[str, Player]) -> None:
-        """
-        Upserts a dictionary of Player objects into the Supabase 'players' table.
+        """Upserts Player objects into the Supabase 'players' table.
 
-        New players (without database_id) are inserted, allowing the database
-        to auto-generate their ID. Existing players (with database_id) are
-        updated using their known ID.
+        New players (without database_id) are inserted. Existing players
+        (with database_id) are updated using their known ID.
 
         Args:
             players_dict: A dictionary mapping player names to Player objects.
+
+        Raises:
+            DatabaseError: If the upsert fails.
         """
-        supabase = get_supabase_client()
         new_players = []
         existing_players = []
 
@@ -69,26 +84,31 @@ class PlayerDB:
             player_data = {
                 "name": p.name,
                 "gender": p.gender,
+                "prior_mu": p.prior_mu,
+                "prior_sigma": p.prior_sigma,
                 "mu": p.mu,
                 "sigma": p.sigma,
             }
             if p.database_id is not None:
-                # Existing player - include ID for update
                 player_data["id"] = p.database_id
                 existing_players.append(player_data)
             else:
-                # New player - let database auto-generate ID
                 new_players.append(player_data)
 
-        # Upsert new players by name (handles re-adding existing players gracefully)
-        if new_players:
-            supabase.table("players").upsert(new_players, on_conflict="name").execute()
+        try:
+            supabase = get_supabase_client()
+            if new_players:
+                supabase.table("players").upsert(
+                    new_players, on_conflict="name"
+                ).execute()
 
-        # Update existing players by their primary key
-        if existing_players:
-            supabase.table("players").upsert(
-                existing_players, on_conflict="id"
-            ).execute()
+            if existing_players:
+                supabase.table("players").upsert(
+                    existing_players, on_conflict="id"
+                ).execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: upsert_players")
+            raise DatabaseError("Failed to save players to database") from e
 
 
 class SessionDB:
@@ -96,8 +116,7 @@ class SessionDB:
 
     @staticmethod
     def create_session(session_name: str, is_doubles: bool) -> int:
-        """
-        Creates a session record in Supabase.
+        """Creates a session record in Supabase.
 
         Args:
             session_name: Unique name for the session
@@ -109,37 +128,80 @@ class SessionDB:
         Raises:
             DatabaseError: If the session could not be created
         """
-        supabase = get_supabase_client()
         game_mode = "Doubles" if is_doubles else "Singles"
-        response = (
-            supabase.table("sessions")
-            .insert({"name": session_name, "game_mode": game_mode})
-            .execute()
-        )
+
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("sessions")
+                .insert({"name": session_name, "game_mode": game_mode})
+                .execute()
+            )
+        except Exception as e:
+            logger.exception(
+                f"Supabase API call failed: create_session '{session_name}'"
+            )
+            raise DatabaseError(f"Failed to create session '{session_name}'") from e
 
         if response.data:
             return response.data[0]["id"]
-        raise DatabaseError(f"Failed to create session '{session_name}' in database")
+
+        logger.error(f"Session creation returned empty data for '{session_name}'")
+        raise DatabaseError(
+            f"Failed to create session '{session_name}' - No ID returned"
+        )
 
     @staticmethod
     def get_session_by_name(session_name: str) -> dict | None:
-        """
-        Retrieves a session by name.
+        """Retrieves a session by name.
 
         Args:
             session_name: Name of the session to retrieve
 
         Returns:
             Session dict or None if not found
+
+        Raises:
+            DatabaseError: If the query fails.
         """
-        supabase = get_supabase_client()
-        response = (
-            supabase.table("sessions").select("*").eq("name", session_name).execute()
-        )
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("sessions")
+                .select("*")
+                .eq("name", session_name)
+                .execute()
+            )
+        except Exception as e:
+            logger.exception(
+                f"Supabase API call failed: get_session_by_name '{session_name}'"
+            )
+            raise DatabaseError(f"Failed to retrieve session '{session_name}'") from e
 
         if response.data:
             return response.data[0]
         return None
+
+    @staticmethod
+    def get_all_sessions() -> list[dict]:
+        """Fetches all sessions from the database.
+
+        Returns:
+            List of session dictionaries with id, name, game_mode, created_at.
+
+        Raises:
+            DatabaseError: If the query fails.
+        """
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("sessions").select("*").order("created_at").execute()
+            )
+        except Exception as e:
+            logger.exception("Supabase API call failed: get_all_sessions")
+            raise DatabaseError("Failed to fetch sessions from database") from e
+
+        return response.data if response.data else []
 
 
 class MatchDB:
@@ -154,8 +216,7 @@ class MatchDB:
         player_3: str | None = None,
         player_4: str | None = None,
     ) -> int:
-        """
-        Records a match result in Supabase.
+        """Records a match result in Supabase.
 
         Args:
             session_id: ID of the session this match belongs to
@@ -171,58 +232,50 @@ class MatchDB:
         Raises:
             DatabaseError: If the match could not be recorded
         """
-        supabase = get_supabase_client()
         data = {
             "session_id": session_id,
             "player_1": player_1,
             "player_2": player_2,
             "winner_side": winner_side,
-            "processed": False,
         }
         if player_3 and player_4:
             data["player_3"] = player_3
             data["player_4"] = player_4
 
-        response = supabase.table("matches").insert(data).execute()
+        try:
+            supabase = get_supabase_client()
+            response = supabase.table("matches").insert(data).execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: add_match")
+            raise DatabaseError("Failed to record match in database") from e
 
         if response.data:
             return response.data[0]["id"]
-        raise DatabaseError("Failed to record match in database")
+
+        logger.error("Match creation returned empty data")
+        raise DatabaseError("Failed to record match - No ID returned")
 
     @staticmethod
-    def get_unprocessed_matches(session_id: int) -> list[dict]:
-        """
-        Gets all unprocessed matches for a session.
-
-        Args:
-            session_id: ID of the session
+    def get_all_matches() -> list[dict]:
+        """Fetches all matches from the database, ordered by session and creation time.
 
         Returns:
-            List of match dictionaries
+            List of match dictionaries.
+
+        Raises:
+            DatabaseError: If the query fails.
         """
-        supabase = get_supabase_client()
-        response = (
-            supabase.table("matches")
-            .select("*")
-            .eq("session_id", session_id)
-            .eq("processed", False)
-            .execute()
-        )
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("matches")
+                .select("*")
+                .order("session_id")
+                .order("id")
+                .execute()
+            )
+        except Exception as e:
+            logger.exception("Supabase API call failed: get_all_matches")
+            raise DatabaseError("Failed to fetch matches from database") from e
 
         return response.data if response.data else []
-
-    @staticmethod
-    def mark_matches_processed(match_ids: list[int]) -> None:
-        """
-        Marks matches as processed after rating update.
-
-        Args:
-            match_ids: List of match IDs to mark as processed
-        """
-        if not match_ids:
-            return
-
-        supabase = get_supabase_client()
-        supabase.table("matches").update({"processed": True}).in_(
-            "id", match_ids
-        ).execute()

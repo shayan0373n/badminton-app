@@ -9,203 +9,213 @@ This page displays the current round's matches and allows users to:
 - Match data is saved for TrueSkill Through Time rating updates
 """
 
+import logging
 import pandas as pd
 import streamlit as st
 
+from constants import PAGE_SETUP, TTT_DEFAULT_MU
 from database import MatchDB, PlayerDB, SessionDB
-from session_logic import Player, SessionManager
+from exceptions import DatabaseError
+from session_logic import ClubNightSession, Player, SessionManager
 from app_types import Gender
 
+logger = logging.getLogger("app.session_page")
 
-def inject_css(file_path: str) -> None:
-    """Injects custom CSS from the specified file path."""
-    try:
-        with open(file_path) as f:
-            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.error(
-            f"CSS file not found at {file_path}. Make sure it's in the root directory."
+
+# =============================================================================
+# Core UI Rendering Functions
+# =============================================================================
+
+
+def render_match_selection(
+    session: ClubNightSession, locked_pairs_set: set[tuple[str, str]]
+) -> dict[int, tuple[str, ...] | None]:
+    """Renders match selection controls and returns winner selections by court.
+
+    Args:
+        session: The active club night session
+        locked_pairs_set: Set of player name tuples representing locked teammate pairs
+
+    Returns:
+        Dictionary mapping court numbers to selected winner tuples (or None if not selected)
+    """
+    winners_by_court: dict[int, tuple[str, ...] | None] = {}
+
+    if not session.current_round_matches:
+        st.warning(
+            "No courts could be formed with the current number of active players."
         )
+        return winners_by_court
+
+    for match in session.current_round_matches:
+        with st.container(border=True):
+            cols = st.columns([1, 3], vertical_alignment="center")
+            with cols[0]:
+                st.markdown(f"#### Court {match['court']}")
+            with cols[1]:
+                if session.is_doubles:
+                    winner = _render_doubles_match(match, locked_pairs_set)
+                else:
+                    winner = _render_singles_match(match)
+                winners_by_court[match["court"]] = winner
+
+    return winners_by_court
 
 
-st.set_page_config(initial_sidebar_state="collapsed", layout="wide")
+def _render_singles_match(match: dict) -> tuple[str, ...] | None:
+    """Renders a singles match selector and returns the winner."""
+    p1, p2 = match["player_1"], match["player_2"]
+    selection = st.segmented_control(
+        "Select Winner",
+        (p1, p2),
+        key=f"court_{match['court']}",
+        label_visibility="collapsed",
+    )
+    if selection == p1:
+        return (p1,)
+    elif selection == p2:
+        return (p2,)
+    return None
 
-inject_css("styles.css")
 
-# --- Page Entry Logic ---
-# If the session object is lost (e.g., page reload), try to load it from the file.
-if "session" not in st.session_state or "current_session_name" not in st.session_state:
-    st.error("No active session found. Please start or resume a session.")
-    st.switch_page("1_Setup.py")
+def _render_doubles_match(
+    match: dict, locked_pairs_set: set[tuple[str, str]]
+) -> tuple[str, ...] | None:
+    """Renders a doubles match selector with lock indicators for fixed pairs."""
+    team_1, team_2 = match["team_1"], match["team_2"]
+    lock_icon = "🔗"
 
-# --- Main App Display ---
-session = st.session_state.session
-session_name = st.session_state.current_session_name
-game_mode_str = "Doubles" if session.is_doubles else "Singles"
-st.title(f"🏸 {session_name} ({game_mode_str})")
+    # Build display names with lock indicators
+    team_1_display = f"{team_1[0]} -- {team_1[1]}"
+    team_2_display = f"{team_2[0]} -- {team_2[1]}"
 
-col1, col2 = st.columns([2, 1])
+    if tuple(sorted(team_1)) in locked_pairs_set:
+        team_1_display = f"{lock_icon} {team_1_display}"
+    if tuple(sorted(team_2)) in locked_pairs_set:
+        team_2_display = f"{lock_icon} {team_2_display}"
 
-with col1:
-    st.header(f"Select Winners for Round {session.round_num}")
+    selection = st.segmented_control(
+        "Select Winner",
+        (team_1_display, team_2_display),
+        key=f"court_{match['court']}",
+        label_visibility="collapsed",
+    )
 
-    # Resting players info
-    st.info(f"**Resting:** {', '.join(session.resting_players)}")
+    if selection == team_1_display:
+        return team_1
+    elif selection == team_2_display:
+        return team_2
+    return None
 
-    # Get locked pairs for visual indicators
-    locked_pairs = []
-    if session.is_doubles:
-        teammate_pairs = session.get_teammate_pairs()
-        locked_pairs_set = set(tuple(sorted(pair)) for pair in teammate_pairs)
-    else:
-        locked_pairs_set = set()
 
-    # Results form
-    with st.form(key="results_form"):
-        winners_by_court = {}
-        if not session.current_round_matches:
-            st.warning(
-                "No courts could be formed with the current number of active players."
+# =============================================================================
+# Match Recording and Round Processing
+# =============================================================================
+
+
+def record_matches_to_database(
+    session: ClubNightSession, winners_by_court: dict[int, tuple[str, ...]]
+) -> None:
+    """Records completed matches to the database for rating updates.
+
+    Args:
+        session: The active session with current round matches
+        winners_by_court: Mapping of court numbers to winning teams
+
+    Raises:
+        DatabaseError: If match recording fails
+    """
+    if not session.current_round_matches or session.database_id is None:
+        return
+
+    for match in session.current_round_matches:
+        court_num = match["court"]
+        winner = winners_by_court.get(court_num)
+        if not winner:
+            continue
+
+        if session.is_doubles:
+            team_1, team_2 = match["team_1"], match["team_2"]
+            winner_side = 1 if set(winner) == set(team_1) else 2
+            MatchDB.add_match(
+                session_id=session.database_id,
+                player_1=team_1[0],
+                player_2=team_1[1],
+                winner_side=winner_side,
+                player_3=team_2[0],
+                player_4=team_2[1],
             )
         else:
-            for i, match in enumerate(session.current_round_matches):
-                with st.container(border=True):  # Wrap each match in a container
-                    cols = st.columns([1, 3], vertical_alignment="center")
-                    with cols[0]:
-                        st.markdown(f"#### Court {match['court']}")
-                    with cols[1]:
-                        if not session.is_doubles:
-                            # Singles: 1v1 match
-                            player_1 = match["player_1"]
-                            player_2 = match["player_2"]
-                            player_1_name = player_1
-                            player_2_name = player_2
-                            winner_selection = st.segmented_control(
-                                "Select Winner",
-                                (player_1_name, player_2_name),
-                                key=f"court_{match['court']}",
-                                label_visibility="collapsed",
-                            )
-                            if winner_selection == player_1_name:
-                                winners_by_court[match["court"]] = (player_1,)
-                            elif winner_selection == player_2_name:
-                                winners_by_court[match["court"]] = (player_2,)
-                            else:
-                                winners_by_court[match["court"]] = None
-                        else:
-                            # Doubles: 2v2 match
-                            team_A = match["team_1"]
-                            team_B = match["team_2"]
+            p1, p2 = match["player_1"], match["player_2"]
+            winner_side = 1 if winner[0] == p1 else 2
+            MatchDB.add_match(
+                session_id=session.database_id,
+                player_1=p1,
+                player_2=p2,
+                winner_side=winner_side,
+            )
 
-                            # Add visual indicator for locked pairs
-                            team_A_key = tuple(sorted(team_A))
-                            team_B_key = tuple(sorted(team_B))
-                            team_A_locked = team_A_key in locked_pairs_set
-                            team_B_locked = team_B_key in locked_pairs_set
 
-                            lock_icon = "🔗"
-                            team_A_names = f"{team_A[0]} -- {team_A[1]}"
-                            team_B_names = f"{team_B[0]} -- {team_B[1]}"
+def process_round_results(
+    session: ClubNightSession,
+    session_name: str,
+    winners_by_court: dict[int, tuple[str, ...]],
+) -> bool:
+    """Validates, records, and finalizes round results.
 
-                            if team_A_locked:
-                                team_A_names = f"{lock_icon} {team_A_names}"
-                            if team_B_locked:
-                                team_B_names = f"{lock_icon} {team_B_names}"
+    Returns:
+        True if processing succeeded and a rerun is needed, False otherwise.
+    """
+    # Validate all courts have winners selected
+    if not winners_by_court:
+        st.warning("Cannot process results as no courts were available.")
+        return False
 
-                            winner_selection = st.segmented_control(
-                                "Select Winner",
-                                (team_A_names, team_B_names),
-                                key=f"court_{match['court']}",
-                                label_visibility="collapsed",
-                            )
-                            if winner_selection == team_A_names:
-                                winners_by_court[match["court"]] = team_A
-                            elif winner_selection == team_B_names:
-                                winners_by_court[match["court"]] = team_B
-                            else:
-                                winners_by_court[match["court"]] = None
+    if not all(v is not None for v in winners_by_court.values()):
+        st.warning("Please select a winner for each court before submitting.")
+        return False
 
-        submitted = st.form_submit_button("✅ Confirm Results")
-        if submitted:
-            if winners_by_court:
-                if all(v is not None for v in winners_by_court.values()):
-                    # Record matches to Supabase before finalizing
-                    session_id = st.session_state.get("current_session_id")
-                    if session_id and session.current_round_matches:
-                        try:
-                            for match in session.current_round_matches:
-                                court_num = match["court"]
-                                winner = winners_by_court.get(court_num)
-                                if winner:
-                                    if not session.is_doubles:
-                                        p1 = match["player_1"]
-                                        p2 = match["player_2"]
-                                        winner_side = 1 if winner[0] == p1 else 2
-                                        MatchDB.add_match(
-                                            session_id=session_id,
-                                            player_1=p1,
-                                            player_2=p2,
-                                            winner_side=winner_side,
-                                        )
-                                    else:  # Doubles
-                                        team_1 = match["team_1"]
-                                        team_2 = match["team_2"]
-                                        winner_side = (
-                                            1 if set(winner) == set(team_1) else 2
-                                        )
-                                        MatchDB.add_match(
-                                            session_id=session_id,
-                                            player_1=team_1[0],
-                                            player_2=team_1[1],
-                                            winner_side=winner_side,
-                                            player_3=team_2[0],
-                                            player_4=team_2[1],
-                                        )
-                        except Exception as e:
-                            st.warning(f"Could not record matches to cloud: {e}")
-
-                    session.finalize_round(winners_by_court)
-                    session.prepare_round()
-                    SessionManager.save(
-                        session, session_name
-                    )  # Save the updated session state
-                    st.rerun()
-                else:
-                    st.warning(
-                        "Please select a winner for each court before submitting."
-                    )
-            else:
-                st.warning("Cannot process results as no courts were available.")
-
-with col2:
-    st.header("Current Standings")
-    standings_data = session.get_standings()
-
-    # Create a DataFrame for better display control
-    if standings_data:
-        df_standings = pd.DataFrame(standings_data, columns=["Player", "Earned Score"])
-        df_standings.index += 1  # Start rank from 1
+    # Record to database
+    if session.database_id is not None:
+        try:
+            record_matches_to_database(session, winners_by_court)
+        except DatabaseError as e:
+            st.warning(f"Could not record matches to cloud: {e}")
+        except Exception:
+            logger.exception("Unexpected error recording matches")
+            st.warning("An unexpected error occurred while saving matches.")
     else:
-        df_standings = pd.DataFrame(columns=["Player", "Earned Score"])
+        st.warning(
+            "⚠️ Session not connected to database. "
+            "Matches will not be recorded for rating updates."
+        )
 
-    st.dataframe(df_standings, use_container_width=True)
+    # Finalize and prepare next round
+    session.finalize_round(winners_by_court)
+    session.prepare_round()
+    SessionManager.save(session, session_name)
+    return True
 
-# --- Session Management in Sidebar ---
-with st.sidebar:
-    st.header("Manage Session")
 
+# =============================================================================
+# Sidebar Sections
+# =============================================================================
+
+
+def render_court_controls(session: ClubNightSession, session_name: str) -> None:
+    """Renders court add/remove controls in the sidebar."""
     with st.expander("🎾 Courts", expanded=False):
         st.markdown(f"**Courts:** {int(session.num_courts)}")
         col_add, col_remove = st.columns(2)
+
         with col_add:
-            if st.button("Add court", key="add_court_btn", use_container_width=True):
+            if st.button("Add court", key="add_court_btn", width="stretch"):
                 session.update_courts(session.num_courts + 1)
                 SessionManager.save(session, session_name)
                 st.rerun()
+
         with col_remove:
-            if st.button(
-                "Remove court", key="remove_court_btn", use_container_width=True
-            ):
+            if st.button("Remove court", key="remove_court_btn", width="stretch"):
                 if session.num_courts > 1:
                     session.update_courts(session.num_courts - 1)
                     SessionManager.save(session, session_name)
@@ -213,15 +223,18 @@ with st.sidebar:
                 else:
                     st.info("Minimum 1 court.")
 
+
+def render_add_player_section(session: ClubNightSession, session_name: str) -> None:
+    """Renders the add player section with registry selection or guest entry."""
     with st.expander("➕ Add Player", expanded=False):
-        # 1. Load the master registry
+        # Load master registry
         try:
             master_registry = PlayerDB.get_all_players()
-        except Exception:
+        except DatabaseError:
             master_registry = {}
             st.warning("Could not load registry. Manual entry only.")
 
-        # Filter out players already in the session
+        # Filter out players already in session
         current_names = set(session.player_pool.keys())
         available_from_registry = [
             name for name in master_registry.keys() if name not in current_names
@@ -235,79 +248,91 @@ with st.sidebar:
         )
 
         if add_method == "Pick from Registry":
-            selected_reg_name = st.selectbox(
-                "Select Member", options=[""] + sorted(available_from_registry)
+            _render_registry_player_add(
+                session, session_name, master_registry, available_from_registry
             )
-            if st.button("Add Member to Session", key="add_reg_btn"):
-                if selected_reg_name:
-                    p = master_registry[selected_reg_name]
-                    added = session.add_player(
-                        name=p.name,
-                        gender=p.gender,
-                        mu=p.mu,
-                        sigma=p.sigma,
-                    )
-                    if added:
-                        SessionManager.save(session, session_name)
-                        st.success(f"Added {selected_reg_name} to the session!")
-                        st.rerun()
-                else:
-                    st.warning("Please select a member.")
         else:
-            # New Guest Entry
-            new_name = st.text_input("Guest Name", key="mid_add_name")
-            new_gender = st.selectbox(
-                "Gender", options=["M", "F"], key="mid_add_gender"
+            _render_guest_player_add(session, session_name)
+
+
+def _render_registry_player_add(
+    session: ClubNightSession,
+    session_name: str,
+    master_registry: dict[str, Player],
+    available_names: list[str],
+) -> None:
+    """Handles adding a player from the registry."""
+    selected_name = st.selectbox(
+        "Select Member", options=[""] + sorted(available_names)
+    )
+
+    if st.button("Add Member to Session", key="add_reg_btn"):
+        if selected_name:
+            p = master_registry[selected_name]
+            added = session.add_player(
+                name=p.name, gender=p.gender, mu=p.mu, sigma=p.sigma
             )
-            new_mu = st.number_input(
-                "Skill (Mu)",
-                min_value=0.0,
-                step=0.5,
-                value=25.0,
-                key="mid_add_mu",
-            )
+            if added:
+                SessionManager.save(session, session_name)
+                st.success(f"Added {selected_name} to the session!")
+                st.rerun()
+        else:
+            st.warning("Please select a member.")
 
-            new_team_name = ""
-            if session.is_doubles:
-                new_team_name = st.text_input(
-                    "Team Name (optional)", key="mid_add_team"
-                )
 
-            if st.button("Create & Add Guest", key="mid_add_btn"):
-                if not new_name.strip():
-                    st.warning("Please enter a name.")
-                else:
-                    # Create Player Object
-                    guest_player = Player(
-                        name=new_name.strip(),
-                        gender=Gender(new_gender),
-                        mu=float(new_mu),
-                        team_name=new_team_name.strip(),
-                    )
+def _render_guest_player_add(session: ClubNightSession, session_name: str) -> None:
+    """Handles creating and adding a new guest player."""
+    new_name = st.text_input("Guest Name", key="mid_add_name")
+    new_gender = st.selectbox("Gender", options=["M", "F"], key="mid_add_gender")
+    new_mu = st.number_input(
+        "Skill (Mu)",
+        min_value=0.0,
+        step=0.5,
+        value=TTT_DEFAULT_MU,
+        key="mid_add_mu",
+    )
 
-                    # 1. Add to Session
-                    added = session.add_player(
-                        name=guest_player.name,
-                        gender=guest_player.gender,
-                        mu=guest_player.mu,
-                        team_name=guest_player.team_name,
-                    )
+    new_team_name = ""
+    if session.is_doubles:
+        new_team_name = st.text_input("Team Name (optional)", key="mid_add_team")
 
-                    if added:
-                        # Save to Supabase
-                        try:
-                            PlayerDB.upsert_players({guest_player.name: guest_player})
-                        except Exception as e:
-                            st.error(f"Failed to sync guest to cloud registry: {e}")
+    if st.button("Create & Add Guest", key="mid_add_btn"):
+        if not new_name.strip():
+            st.warning("Please enter a name.")
+            return
 
-                        SessionManager.save(session, session_name)
-                        st.success(f"Added {new_name} and saved to Member Registry!")
-                        st.rerun()
-                    else:
-                        st.warning("A player with that name already exists.")
+        guest = Player(
+            name=new_name.strip(),
+            gender=Gender(new_gender),
+            mu=float(new_mu),
+            team_name=new_team_name.strip(),
+        )
 
+        added = session.add_player(
+            name=guest.name,
+            gender=guest.gender,
+            mu=guest.mu,
+            team_name=guest.team_name,
+        )
+
+        if added:
+            # Sync to cloud registry
+            try:
+                PlayerDB.upsert_players({guest.name: guest})
+            except DatabaseError:
+                st.error("Failed to sync guest to cloud registry.")
+
+            SessionManager.save(session, session_name)
+            st.success(f"Added {new_name} and saved to Member Registry!")
+            st.rerun()
+        else:
+            st.warning("A player with that name already exists.")
+
+
+def render_remove_player_section(session: ClubNightSession, session_name: str) -> None:
+    """Renders the remove player section with queued removal display."""
     with st.expander("➖ Remove Player", expanded=False):
-        # Show queued removals if any
+        # Show queued removals
         if session.queued_removals:
             st.warning(
                 f"⏳ Queued for removal: {', '.join(sorted(session.queued_removals))}"
@@ -316,80 +341,127 @@ with st.sidebar:
                 "These players will be removed when you confirm the current round results."
             )
 
-        # Get list of all players
         all_players = list(session.player_pool.keys())
-        if all_players:
-            player_to_remove = st.selectbox(
-                "Select Player to Remove",
-                options=sorted(all_players),
-                key="remove_player_select",
-            )
-            if st.button("Remove Player", key="mid_remove_btn", type="secondary"):
-                success, status = session.remove_player(player_to_remove)
-                if success:
-                    if status == "immediate":
-                        SessionManager.save(session, session_name)
-                        st.success(f"✅ Removed {player_to_remove} from the session.")
-                        st.rerun()
-                    elif status == "queued":
-                        SessionManager.save(session, session_name)
-                        st.info(
-                            f"⏳ {player_to_remove} is currently playing and will be removed after you confirm this round's results."
-                        )
-                        st.rerun()
-                else:
-                    st.error(f"Player {player_to_remove} not found.")
-        else:
+        if not all_players:
             st.info("No players to remove.")
+            return
 
-    with st.expander("📊 Rating Updates", expanded=False):
-        session_id = st.session_state.get("current_session_id")
+        player_to_remove = st.selectbox(
+            "Select Player to Remove",
+            options=sorted(all_players),
+            key="remove_player_select",
+        )
 
-        if session_id:
-            st.caption("TrueSkill Through Time rating updates.")
-            st.info("⏳ TTT rating updates coming soon. Match data is being saved.")
+        if st.button("Remove Player", key="mid_remove_btn", type="secondary"):
+            success, status = session.remove_player(player_to_remove)
+            if success:
+                SessionManager.save(session, session_name)
+                if status == "immediate":
+                    st.success(f"✅ Removed {player_to_remove} from the session.")
+                elif status == "queued":
+                    st.info(
+                        f"⏳ {player_to_remove} is currently playing and will be "
+                        "removed after you confirm this round's results."
+                    )
+                st.rerun()
+            else:
+                st.error(f"Player {player_to_remove} not found.")
 
-            # Show match count
-            try:
-                unprocessed = MatchDB.get_unprocessed_matches(session_id)
-                if unprocessed:
-                    st.metric("Unprocessed Matches", len(unprocessed))
-            except Exception as e:
-                st.caption(f"Could not fetch match count: {e}")
-        else:
-            st.warning("Session not connected to cloud. Rating updates unavailable.")
 
-    if st.button("⚠️ Terminate Session"):
-        # Preserve the player table and session parameters for the next session
-        if "session" in st.session_state:
-            st.session_state.player_table = st.session_state.session.player_pool
-            st.session_state.player_table_updated = True  # Flag to refresh editor
+def handle_session_termination(session: ClubNightSession, session_name: str) -> None:
+    """Handles session termination with state preservation."""
+    if not st.button("⚠️ Terminate Session"):
+        return
 
-            # Preserve session parameters
-            st.session_state.num_courts_persistent = st.session_state.session.num_courts
-            st.session_state.is_doubles_persistent = st.session_state.session.is_doubles
-            st.session_state.weights = st.session_state.session.weights.copy()
-            st.session_state.skill_weight = st.session_state.weights.get("skill", 1.0)
-            st.session_state.power_weight = st.session_state.weights.get("power", 1.0)
-            st.session_state.pairing_weight = st.session_state.weights.get(
-                "pairing", 1.0
-            )
-            st.session_state.female_female_team_penalty = (
-                st.session_state.session.female_female_team_penalty
-            )
-            st.session_state.mixed_gender_team_penalty = (
-                st.session_state.session.mixed_gender_team_penalty
-            )
-            st.session_state.female_singles_penalty = (
-                st.session_state.session.female_singles_penalty
-            )
+    # Preserve session state for next session
+    persistent = session.get_persistent_state()
+    st.session_state.player_table = persistent["player_pool"]
+    st.session_state.player_table_updated = True
+    st.session_state.num_courts_persistent = persistent["num_courts"]
+    st.session_state.is_doubles_persistent = persistent["is_doubles"]
+    st.session_state.weights = persistent["weights"]
+    st.session_state.skill_weight = persistent["weights"].get("skill", 1.0)
+    st.session_state.power_weight = persistent["weights"].get("power", 1.0)
+    st.session_state.pairing_weight = persistent["weights"].get("pairing", 1.0)
+    st.session_state.female_female_team_penalty = persistent[
+        "female_female_team_penalty"
+    ]
+    st.session_state.mixed_gender_team_penalty = persistent["mixed_gender_team_penalty"]
+    st.session_state.female_singles_penalty = persistent["female_singles_penalty"]
 
-        SessionManager.clear(session_name)  # Clear the session state file
+    # Clean up
+    SessionManager.clear(session_name)
+    st.session_state.pop("session", None)
+    st.session_state.pop("current_session_name", None)
 
-        # Clear session objects from state
-        if "session" in st.session_state:
-            del st.session_state["session"]
-        if "current_session_name" in st.session_state:
-            del st.session_state["current_session_name"]
+    st.switch_page(PAGE_SETUP)
 
-        st.switch_page("1_Setup.py")
+
+# =============================================================================
+# Page Setup and Main Layout
+# =============================================================================
+
+
+def inject_css(file_path: str) -> None:
+    """Injects custom CSS from the specified file path."""
+    try:
+        with open(file_path) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.error(f"CSS file not found at {file_path}.")
+
+
+st.set_page_config(initial_sidebar_state="collapsed", layout="wide")
+inject_css("styles.css")
+
+# --- Page Entry Validation ---
+if "session" not in st.session_state or "current_session_name" not in st.session_state:
+    st.error("No active session found. Please start or resume a session.")
+    st.switch_page(PAGE_SETUP)
+
+session: ClubNightSession = st.session_state.session
+session_name: str = st.session_state.current_session_name
+
+# --- Main Layout ---
+game_mode_str = "Doubles" if session.is_doubles else "Singles"
+st.title(f"🏸 {session_name} ({game_mode_str})")
+
+col_matches, col_standings = st.columns([2, 1])
+
+# Left column: Match selection form
+with col_matches:
+    st.header(f"Select Winners for Round {session.round_num}")
+    st.info(f"**Resting:** {', '.join(session.resting_players)}")
+
+    # Build locked pairs set for visual indicators
+    locked_pairs_set: set[tuple[str, str]] = set()
+    if session.is_doubles:
+        locked_pairs_set = {
+            tuple(sorted(pair)) for pair in session.get_teammate_pairs()
+        }
+
+    with st.form(key="results_form"):
+        winners_by_court = render_match_selection(session, locked_pairs_set)
+        submitted = st.form_submit_button("✅ Confirm Results")
+
+        if submitted and process_round_results(session, session_name, winners_by_court):
+            st.rerun()
+
+# Right column: Standings
+with col_standings:
+    st.header("Current Standings")
+    standings_data = session.get_standings()
+    if standings_data:
+        df_standings = pd.DataFrame(standings_data, columns=["Player", "Earned Score"])
+        df_standings.index += 1
+    else:
+        df_standings = pd.DataFrame(columns=["Player", "Earned Score"])
+    st.dataframe(df_standings, width="stretch")
+
+# --- Sidebar ---
+with st.sidebar:
+    st.header("Manage Session")
+    render_court_controls(session, session_name)
+    render_add_player_section(session, session_name)
+    render_remove_player_section(session, session_name)
+    handle_session_termination(session, session_name)

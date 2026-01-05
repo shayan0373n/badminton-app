@@ -42,6 +42,9 @@ PlayerGenders = dict[PlayerName, Gender]
 # History of how often player pairs have been partnered together
 PartnerHistory = dict[PlayerPair, int]
 
+# Graph of required partner relationships (player -> set of players they must partner with)
+RequiredPartners = dict[PlayerName, set[PlayerName]]
+
 # A single match assignment (keys vary between singles/doubles)
 Match = dict[str, Any]
 

@@ -23,6 +23,7 @@ from app_types import (
     PlayerName,
     PlayerPair,
     PlayerRatings,
+    RequiredPartners,
     Gender,
 )
 
@@ -198,7 +199,7 @@ def generate_one_round(
     players_per_court: int = 4,
     weights: dict[str, float] | None = None,
     is_doubles: bool = True,
-    teammate_pairs: list[PlayerPair] | None = None,
+    required_partners: RequiredPartners | None = None,
 ) -> OptimizerResult:
     """
     Generates a single, optimized round of badminton matches.
@@ -217,7 +218,7 @@ def generate_one_round(
         players_per_court: Number of players per court (2 for singles, 4 for doubles)
         weights: Dict with 'skill', 'power', 'pairing' weight values
         is_doubles: True for doubles mode, False for singles mode
-        teammate_pairs: Optional list of locked teammate pairs (doubles only)
+        required_partners: Optional dict mapping players to their required partners (doubles only)
 
     Returns:
         OptimizerResult with matches and updated partner history
@@ -276,8 +277,12 @@ def generate_one_round(
         max_team_power[c] - min_team_power[c] for c in range(num_courts)
     )
 
-    # Exclude locked pairs from pairing history penalty
-    locked_pairs_set = set(tuple(sorted(pair)) for pair in (teammate_pairs or []))
+    # Exclude required partner pairs from pairing history penalty (they're forced anyway)
+    locked_pairs_set: set[tuple[str, str]] = set()
+    if required_partners:
+        for player, partners in required_partners.items():
+            for partner in partners:
+                locked_pairs_set.add(tuple(sorted((player, partner))))
     total_pairing_objective = pulp.lpSum(
         t[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
         for pair in player_pairs
@@ -310,17 +315,23 @@ def generate_one_round(
                 pulp.lpSum(t[pair][c] for pair in player_pairs if p in pair) == x[p][c]
             )
 
-    # Hard constraints for teammate pairs: force them to partner together if both are playing
-    if teammate_pairs:
-        locked_pairs = [tuple(sorted(pair)) for pair in teammate_pairs]
-        for p1, p2 in locked_pairs:
-            # Only enforce if both players are available (not resting)
-            if p1 in available_players and p2 in available_players:
+    # Hard constraints for required partners:
+    # If a player plays, at least one of their available required partners must be their partner
+    if required_partners:
+        for player, partners in required_partners.items():
+            if player not in available_players:
+                continue
+            # Filter to only available partners
+            available_partners = [p for p in partners if p in available_players]
+            if available_partners:
                 for c in range(num_courts):
-                    # If p1 plays on court c, p2 must also play on court c
-                    prob += x[p2][c] == x[p1][c]
-                    # They must be partners on that court
-                    prob += t[(p1, p2)][c] == x[p1][c]
+                    # If player plays on court c, at least one required partner must be with them
+                    prob += (
+                        pulp.lpSum(
+                            t[tuple(sorted((player, p)))][c] for p in available_partners
+                        )
+                        >= x[player][c]
+                    )
 
     for c in range(num_courts):
         for p in available_players:

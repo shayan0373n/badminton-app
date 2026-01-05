@@ -11,6 +11,7 @@ import pickle
 import random
 from collections import defaultdict
 from dataclasses import dataclass
+from itertools import combinations
 
 from constants import (
     DEFAULT_IS_DOUBLES,
@@ -24,7 +25,14 @@ from constants import (
 )
 from exceptions import SessionError
 from optimizer import generate_one_round
-from app_types import Gender, MatchList, PartnerHistory, PlayerName, PlayerPair
+from app_types import (
+    Gender,
+    MatchList,
+    PartnerHistory,
+    PlayerName,
+    PlayerPair,
+    RequiredPartners,
+)
 
 logger = logging.getLogger("app.session_logic")
 
@@ -180,22 +188,33 @@ class ClubNightSession:
         random.shuffle(self._rest_rotation_queue)
         self.queued_removals: set[PlayerName] = set()  # Players marked for removal
 
-    def get_teammate_pairs(self) -> list[PlayerPair]:
-        """Extract teammate pairs from player team names.
+    def get_required_partners(self) -> RequiredPartners:
+        """Build graph of required partner relationships from team memberships.
+
+        Players can belong to multiple teams (comma-separated team names).
+        Each team creates pairwise "must partner with" relationships between members.
 
         Returns:
-            List of (player1, player2) tuples for players sharing same team name.
+            Dict mapping each player to the set of players they must partner with
+            (when at least one is available).
         """
+        # Parse comma-separated team names into groups
         team_groups: dict[str, list[PlayerName]] = defaultdict(list)
         for player_name, player in self.player_pool.items():
-            if player.team_name and player.team_name.strip():
-                team_groups[player.team_name.strip()].append(player_name)
+            if player.team_name:
+                for team in player.team_name.split(","):
+                    team = team.strip()
+                    if team:
+                        team_groups[team].append(player_name)
 
-        pairs: list[PlayerPair] = []
-        for team_name, members in team_groups.items():
-            if len(members) == 2:
-                pairs.append(tuple(sorted(members)))
-        return pairs
+        # Build required partners graph from team memberships
+        required: RequiredPartners = defaultdict(set)
+        for members in team_groups.values():
+            if len(members) >= 2:
+                for p1, p2 in combinations(members, 2):
+                    required[p1].add(p2)
+                    required[p2].add(p1)
+        return dict(required)
 
     def prepare_round(self) -> None:
         """
@@ -203,14 +222,8 @@ class ClubNightSession:
         """
         self.round_num += 1
 
-        # Get teammate pairs for this round
-        teammate_pairs = self.get_teammate_pairs() if self.is_doubles else []
-
-        # Create a set of all players who are in a locked pair
-        paired_players = set()
-        for p1, p2 in teammate_pairs:
-            paired_players.add(p1)
-            paired_players.add(p2)
+        # Get required partners graph for this round (doubles only)
+        required_partners = self.get_required_partners() if self.is_doubles else {}
 
         # 1. Determine who is resting and adjust courts if needed
         total_players = len(self.player_pool)
@@ -220,34 +233,13 @@ class ClubNightSession:
         num_players_to_play = active_courts * self.players_per_court
         num_to_rest = total_players - num_players_to_play
 
-        # Rest rotation with pair coordination
-        # Build a map of player -> their partner (if any)
-        partner_map = {}
-        for p1, p2 in teammate_pairs:
-            partner_map[p1] = p2
-            partner_map[p2] = p1
-
+        # Simple rest rotation - no partner coordination needed
+        # The optimizer handles required partner constraints
         resting = []
-        already_processed = set()
-
-        # Go through the rotation queue in order
         for player in self._rest_rotation_queue:
-            if player in already_processed:
-                continue
-
             if len(resting) >= num_to_rest:
                 break
-
-            # Add this player to resting list
             resting.append(player)
-            already_processed.add(player)
-
-            # If they have a teammate AND we still need more resting players, add teammate too
-            if player in partner_map and len(resting) < num_to_rest:
-                partner = partner_map[player]
-                if partner not in already_processed:
-                    resting.append(partner)
-                    already_processed.add(partner)
 
         self.resting_players = set(resting)
 
@@ -276,7 +268,7 @@ class ClubNightSession:
             female_singles_penalty=self.female_singles_penalty,
             players_per_court=self.players_per_court,
             is_doubles=self.is_doubles,
-            teammate_pairs=teammate_pairs,
+            required_partners=required_partners,
         )
 
         if not result.success:

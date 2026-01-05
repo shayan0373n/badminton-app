@@ -266,11 +266,24 @@ def _render_registry_player_add(
         "Select Member", options=[""] + sorted(available_names)
     )
 
+    # Show team name input in doubles mode (session-specific, not from database)
+    team_name = ""
+    if session.is_doubles:
+        team_name = st.text_input(
+            "Team Name(s)",
+            key="reg_add_team",
+            help="Comma-separated for multiple teams (e.g., 'TeamA, TeamB')",
+        )
+
     if st.button("Add Member to Session", key="add_reg_btn"):
         if selected_name:
             p = master_registry[selected_name]
             added = session.add_player(
-                name=p.name, gender=p.gender, mu=p.mu, sigma=p.sigma
+                name=p.name,
+                gender=p.gender,
+                mu=p.mu,
+                sigma=p.sigma,
+                team_name=team_name.strip() if session.is_doubles else "",
             )
             if added:
                 SessionManager.save(session, session_name)
@@ -294,7 +307,11 @@ def _render_guest_player_add(session: ClubNightSession, session_name: str) -> No
 
     new_team_name = ""
     if session.is_doubles:
-        new_team_name = st.text_input("Team Name (optional)", key="mid_add_team")
+        new_team_name = st.text_input(
+            "Team Name(s)",
+            key="mid_add_team",
+            help="Comma-separated for multiple teams (e.g., 'TeamA, TeamB')",
+        )
 
     if st.button("Create & Add Guest", key="mid_add_btn"):
         if not new_name.strip():
@@ -437,12 +454,13 @@ with col_matches:
     st.header(f"Select Winners for Round {session.round_num}")
     st.info(f"**Resting:** {', '.join(session.resting_players)}")
 
-    # Build locked pairs set for visual indicators
+    # Build locked pairs set for visual indicators from required partners graph
     locked_pairs_set: set[tuple[str, str]] = set()
     if session.is_doubles:
-        locked_pairs_set = {
-            tuple(sorted(pair)) for pair in session.get_teammate_pairs()
-        }
+        required_partners = session.get_required_partners()
+        for player, partners in required_partners.items():
+            for partner in partners:
+                locked_pairs_set.add(tuple(sorted((player, partner))))
 
     with st.form(key="results_form"):
         winners_by_court = render_match_selection(session, locked_pairs_set)

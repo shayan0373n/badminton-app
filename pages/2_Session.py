@@ -380,14 +380,15 @@ def handle_session_termination(session: ClubNightSession, session_name: str) -> 
     st.session_state.num_courts_persistent = persistent["num_courts"]
     st.session_state.is_doubles_persistent = persistent["is_doubles"]
     st.session_state.weights = persistent["weights"]
-    st.session_state.skill_weight = persistent["weights"].get("skill", 1.0)
-    st.session_state.power_weight = persistent["weights"].get("power", 1.0)
-    st.session_state.pairing_weight = persistent["weights"].get("pairing", 1.0)
+    st.session_state.skill_weight = persistent["weights"]["skill"]
+    st.session_state.power_weight = persistent["weights"]["power"]
+    st.session_state.pairing_weight = persistent["weights"]["pairing"]
     st.session_state.female_female_team_penalty = persistent[
         "female_female_team_penalty"
     ]
     st.session_state.mixed_gender_team_penalty = persistent["mixed_gender_team_penalty"]
     st.session_state.female_singles_penalty = persistent["female_singles_penalty"]
+    st.session_state.is_recorded_persistent = persistent["is_recorded"]
 
     # Clean up
     SessionManager.clear(session_name)
@@ -424,7 +425,10 @@ session_name: str = st.session_state.current_session_name
 
 # --- Main Layout ---
 game_mode_str = "Doubles" if session.is_doubles else "Singles"
-st.title(f"🏸 {session_name} ({game_mode_str})")
+record_indicator = "📊" if session.is_recorded else "🚫"
+st.title(f"🏸 {session_name} ({game_mode_str}) {record_indicator}")
+if not session.is_recorded:
+    st.caption("⚠️ This session is not being recorded to the dataset.")
 
 col_matches, col_standings = st.columns([2, 1])
 

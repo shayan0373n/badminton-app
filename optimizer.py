@@ -100,8 +100,8 @@ def generate_singles_round(
     )
 
     prob += (
-        weights.get("skill", 1.0) * total_skill_objective
-        + weights.get("pairing", 1.0) * total_pairing_objective
+        weights["skill"] * total_skill_objective
+        + weights["pairing"] * total_pairing_objective
     ), "Minimize_Weighted_Objectives"
 
     # Constraints: exactly 2 players per court
@@ -286,9 +286,9 @@ def generate_one_round(
     )
 
     prob += (
-        weights.get("skill", 1.0) * total_skill_objective
-        + weights.get("power", 1.0) * total_power_objective
-        + weights.get("pairing", 1.0) * total_pairing_objective
+        weights["skill"] * total_skill_objective
+        + weights["power"] * total_power_objective
+        + weights["pairing"] * total_pairing_objective
     ), "Minimize_Weighted_Objectives"
 
     for c in range(num_courts):

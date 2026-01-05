@@ -35,9 +35,6 @@ import pandas as pd
 from constants import (
     DEFAULT_IS_DOUBLES,
     DEFAULT_NUM_COURTS,
-    DEFAULT_PENALTY_FEMALE_FEMALE_TEAM,
-    DEFAULT_PENALTY_FEMALE_SINGLES,
-    DEFAULT_PENALTY_MIXED_GENDER_TEAM,
     DEFAULT_WEIGHTS,
     PAGE_SESSION,
     PLAYERS_PER_COURT_DOUBLES,
@@ -147,18 +144,21 @@ def start_session(
     female_singles_penalty: float,
     session_name: str,
     is_doubles: bool,
+    is_recorded: bool = True,
 ) -> None:
     """Creates and starts a new badminton session.
 
     Raises:
         Stops execution via st.stop() if database session cannot be created.
     """
-    # Create session record in Supabase FIRST (fail-fast)
-    try:
-        database_id = SessionDB.create_session(session_name, is_doubles)
-    except Exception as e:
-        st.error(f"Could not create session in database: {e}")
-        st.stop()
+    # Create session record in Supabase only if recording is enabled
+    database_id = None
+    if is_recorded:
+        try:
+            database_id = SessionDB.create_session(session_name, is_doubles)
+        except Exception as e:
+            st.error(f"Could not create session in database: {e}")
+            st.stop()
 
     session = ClubNightSession(
         players=player_table,
@@ -169,6 +169,7 @@ def start_session(
         mixed_gender_team_penalty=mixed_gender_team_penalty,
         female_singles_penalty=female_singles_penalty,
         is_doubles=is_doubles,
+        is_recorded=is_recorded,
     )
     session.prepare_round()
 
@@ -316,10 +317,10 @@ with tab2:
             new_registry[row["Player Name"]] = Player(
                 name=row["Player Name"],
                 gender=Gender(row["Gender"]),
-                prior_mu=float(row.get("Prior Mu", TTT_DEFAULT_MU)),
+                prior_mu=float(row["Prior Mu"]),
                 prior_sigma=TTT_DEFAULT_SIGMA,  # Fixed for now
                 mu=float(row["Mu"]),
-                sigma=float(row.get("Sigma", TTT_DEFAULT_SIGMA)),
+                sigma=float(row["Sigma"]),
                 database_id=db_id,  # Preserve DB ID for proper updates
             )
 
@@ -421,29 +422,23 @@ with st.sidebar:
 
     # Initialize individual weight keys if they don't exist
     if "skill_weight" not in st.session_state:
-        st.session_state.skill_weight = st.session_state.weights.get(
-            "skill", DEFAULT_WEIGHTS["skill"]
-        )
+        st.session_state.skill_weight = st.session_state.weights["skill"]
     if "power_weight" not in st.session_state:
-        st.session_state.power_weight = st.session_state.weights.get(
-            "power", DEFAULT_WEIGHTS["power"]
-        )
+        st.session_state.power_weight = st.session_state.weights["power"]
     if "pairing_weight" not in st.session_state:
-        st.session_state.pairing_weight = st.session_state.weights.get(
-            "pairing", DEFAULT_WEIGHTS["pairing"]
-        )
+        st.session_state.pairing_weight = st.session_state.weights["pairing"]
     if "female_female_team_penalty" not in st.session_state:
-        st.session_state.female_female_team_penalty = st.session_state.weights.get(
-            "female_female_team_penalty", DEFAULT_PENALTY_FEMALE_FEMALE_TEAM
-        )
+        st.session_state.female_female_team_penalty = st.session_state.weights[
+            "female_female_team_penalty"
+        ]
     if "mixed_gender_team_penalty" not in st.session_state:
-        st.session_state.mixed_gender_team_penalty = st.session_state.weights.get(
-            "mixed_gender_team_penalty", DEFAULT_PENALTY_MIXED_GENDER_TEAM
-        )
+        st.session_state.mixed_gender_team_penalty = st.session_state.weights[
+            "mixed_gender_team_penalty"
+        ]
     if "female_singles_penalty" not in st.session_state:
-        st.session_state.female_singles_penalty = st.session_state.weights.get(
-            "female_singles_penalty", DEFAULT_PENALTY_FEMALE_SINGLES
-        )
+        st.session_state.female_singles_penalty = st.session_state.weights[
+            "female_singles_penalty"
+        ]
 
     # Let the widgets manage their own state via keys
     st.number_input("Skill Balance", min_value=0, step=1, key="skill_weight")
@@ -522,6 +517,17 @@ num_courts = st.number_input(
 # Keep the persistent value in sync with the widget
 st.session_state.num_courts_persistent = num_courts
 
+# Initialize is_recorded persistent state
+if "is_recorded_persistent" not in st.session_state:
+    st.session_state.is_recorded_persistent = True
+
+is_recorded = st.checkbox(
+    "Record to Dataset",
+    value=st.session_state.is_recorded_persistent,
+    help="When enabled, session matches are saved to the database for rating calculations",
+)
+st.session_state.is_recorded_persistent = is_recorded
+
 if st.button("🚀 Start New Session", type="primary"):
     # Validate player_table
     if "player_table" not in st.session_state or not st.session_state.player_table:
@@ -573,6 +579,7 @@ if st.button("🚀 Start New Session", type="primary"):
             st.session_state.weights["female_singles_penalty"],
             final_session_name,
             is_doubles,
+            is_recorded,
         )
     else:
         # If validation fails, show error

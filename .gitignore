@@ -204,3 +204,6 @@ __marimo__/
 
 # Pickle
 *.pkl
+
+# Agent configuration
+.agent/

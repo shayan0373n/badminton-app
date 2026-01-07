@@ -176,19 +176,17 @@ def process_round_results(
         return False
 
     # Record to database
-    if session.database_id is not None:
-        try:
-            record_matches_to_database(session, winners_by_court)
-        except DatabaseError as e:
-            st.warning(f"Could not record matches to cloud: {e}")
-        except Exception:
-            logger.exception("Unexpected error recording matches")
-            st.warning("An unexpected error occurred while saving matches.")
-    else:
-        st.warning(
-            "⚠️ Session not connected to database. "
-            "Matches will not be recorded for rating updates."
-        )
+    if session.is_recorded:
+        if session.database_id is not None:
+            try:
+                record_matches_to_database(session, winners_by_court)
+            except DatabaseError as e:
+                st.warning(f"Could not record matches to cloud: {e}")
+        else:
+            st.warning(
+                "⚠️ Session not connected to database. "
+                "Matches will not be recorded for rating updates."
+            )
 
     # Finalize and prepare next round
     session.finalize_round(winners_by_court)
@@ -442,8 +440,7 @@ session_name: str = st.session_state.current_session_name
 
 # --- Main Layout ---
 game_mode_str = "Doubles" if session.is_doubles else "Singles"
-record_indicator = "📊" if session.is_recorded else "🚫"
-st.title(f"🏸 {session_name} ({game_mode_str}) {record_indicator}")
+st.title(f"🏸 {session_name} ({game_mode_str})", anchor=False)
 if not session.is_recorded:
     st.caption("⚠️ This session is not being recorded to the dataset.")
 

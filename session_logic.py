@@ -39,6 +39,78 @@ logger = logging.getLogger("app.session_logic")
 SESSIONS_DIR = "sessions"
 
 
+class RestRotationQueue:
+    """Manages fair rotation of which players rest each round.
+
+    Maintains a queue where players at the front rest first, then rotate
+    to the back after resting. This ensures everyone gets roughly equal
+    play time over multiple rounds.
+
+    Precondition:
+        Player names must be unique. Behavior is undefined if duplicates
+        are present in the input list or added via add_player().
+    """
+
+    def __init__(self, players: list[PlayerName], shuffle: bool = True) -> None:
+        """Initialize the rotation queue.
+
+        Args:
+            players: List of player names to include in rotation
+            shuffle: Whether to randomize initial order (default True)
+        """
+        self._queue: list[PlayerName] = players.copy()
+        if shuffle:
+            random.shuffle(self._queue)
+
+    def get_resting_players(
+        self, num_courts: int, players_per_court: int = 4
+    ) -> set[PlayerName]:
+        """Determine which players should rest this round.
+
+        Args:
+            num_courts: Number of available courts
+            players_per_court: Players needed per court (4 for doubles, 2 for singles)
+
+        Returns:
+            Set of player names who should rest this round
+        """
+        total_players = len(self._queue)
+        max_courts = total_players // players_per_court
+        active_courts = min(num_courts, max_courts)
+        num_to_play = active_courts * players_per_court
+        num_to_rest = total_players - num_to_play
+
+        return set(self._queue[:num_to_rest])
+
+    def rotate_after_round(self, who_rested: set[PlayerName]) -> None:
+        """Move rested players to the end of the queue.
+
+        Call this after a successful round to advance the rotation.
+
+        Args:
+            who_rested: Set of players who rested this round
+        """
+        rested_in_order = [p for p in self._queue if p in who_rested]
+        random.shuffle(rested_in_order)
+        self._queue = [p for p in self._queue if p not in who_rested] + rested_in_order
+
+    def add_player(self, name: PlayerName) -> None:
+        """Add a new player to the end of the queue (will rest first)."""
+        if name not in self._queue:
+            self._queue.append(name)
+
+    def remove_player(self, name: PlayerName) -> None:
+        """Remove a player from the queue."""
+        if name in self._queue:
+            self._queue.remove(name)
+
+    def __len__(self) -> int:
+        return len(self._queue)
+
+    def __contains__(self, name: PlayerName) -> bool:
+        return name in self._queue
+
+
 @dataclass
 class Player:
     """Represents a player with their TrueSkill Through Time rating and session-specific score."""
@@ -184,8 +256,7 @@ class ClubNightSession:
         # Session flow state
         self.current_round_matches: MatchList | None = None
         self.resting_players: set[PlayerName] = set()
-        self._rest_rotation_queue: list[PlayerName] = list(self.player_pool.keys())
-        random.shuffle(self._rest_rotation_queue)
+        self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
         self.queued_removals: set[PlayerName] = set()  # Players marked for removal
 
     def get_required_partners(self) -> RequiredPartners:
@@ -225,23 +296,15 @@ class ClubNightSession:
         # Get required partners graph for this round (doubles only)
         required_partners = self.get_required_partners() if self.is_doubles else {}
 
-        # 1. Determine who is resting and adjust courts if needed
+        # 1. Determine who is resting using the rotation queue
+        self.resting_players = self._rest_queue.get_resting_players(
+            self.num_courts, self.players_per_court
+        )
+
+        # Calculate active courts for optimizer
         total_players = len(self.player_pool)
         max_courts = total_players // self.players_per_court
         active_courts = min(self.num_courts, max_courts)
-
-        num_players_to_play = active_courts * self.players_per_court
-        num_to_rest = total_players - num_players_to_play
-
-        # Simple rest rotation - no partner coordination needed
-        # The optimizer handles required partner constraints
-        resting = []
-        for player in self._rest_rotation_queue:
-            if len(resting) >= num_to_rest:
-                break
-            resting.append(player)
-
-        self.resting_players = set(resting)
 
         # 1. Prepare raw data and Normalize ratings (0-5 scale) for optimizer stability
         original_ratings = {p.name: p.rating for p in self.player_pool.values()}
@@ -282,13 +345,7 @@ class ClubNightSession:
         self.current_round_matches = sorted(matches, key=lambda m: m["court"])
 
         # 4. Rotate the rest queue for the next round
-        players_who_rested = [
-            p for p in self._rest_rotation_queue if p in self.resting_players
-        ]
-        random.shuffle(players_who_rested)
-        self._rest_rotation_queue = [
-            p for p in self._rest_rotation_queue if p not in self.resting_players
-        ] + players_who_rested
+        self._rest_queue.rotate_after_round(self.resting_players)
 
     def finalize_round(self, winners_by_court: dict[int, tuple[str, ...]]) -> None:
         """
@@ -401,7 +458,7 @@ class ClubNightSession:
 
         # Add to rest queue and player pool
         self.player_pool[name] = new_player
-        self._rest_rotation_queue.append(name)
+        self._rest_queue.add_player(name)
         self.resting_players.add(name)
 
         return True
@@ -448,8 +505,7 @@ class ClubNightSession:
         """Internal method to actually remove a player from all structures."""
         if name in self.player_pool:
             del self.player_pool[name]
-        if name in self._rest_rotation_queue:
-            self._rest_rotation_queue.remove(name)
+        self._rest_queue.remove_player(name)
         if name in self.resting_players:
             self.resting_players.remove(name)
         if name in self.queued_removals:

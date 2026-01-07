@@ -50,7 +50,9 @@ def generate_singles_round(
 
     Args:
         available_players: List of player names available to play
-        num_courts: Number of courts to fill
+        num_courts: Number of courts to fill. If more courts are requested than
+            players can fill, the optimizer will auto-reduce to the maximum
+            feasible number of courts.
         player_ratings: Dict mapping player names to their normalized ratings
         player_genders: Dict mapping player names to 'M' or 'F'
         historical_partners: Dict tracking how often player pairs have faced each other
@@ -62,6 +64,13 @@ def generate_singles_round(
     """
     if weights is None:
         weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
+
+    # Auto-reduce courts if not enough players
+    max_courts = len(available_players) // 2
+    num_courts = min(num_courts, max_courts)
+
+    if num_courts == 0:
+        return OptimizerResult(matches=[], partner_history=historical_partners)
 
     # Apply female penalty to female players' ratings (using normalized values for math)
     normalized_adjusted: PlayerRatings = {}
@@ -168,7 +177,9 @@ def generate_singles_round(
         if len(court_players) == 2:
             p1, p2 = sorted(court_players)
             pair_key = tuple(sorted((p1, p2)))
-            updated_historical_partners[pair_key] += 1
+            updated_historical_partners[pair_key] = (
+                updated_historical_partners.get(pair_key, 0) + 1
+            )
 
             matches.append(
                 {
@@ -210,7 +221,10 @@ def generate_one_round(
         player_ratings: Dict mapping player names to normalized ratings (0-5 scale)
         player_genders: Dict mapping player names to 'M' or 'F'
         players_to_rest: Set of player names who should rest this round
-        num_courts: Number of courts to fill
+        num_courts: Number of courts to fill. If more courts are requested than
+            available players can fill, the optimizer will auto-reduce to the
+            maximum feasible number. Check len(result.matches) to see actual
+            courts used.
         historical_partners: Dict tracking partner history
         female_female_team_penalty: Rating adjustment for FF teams in doubles
         mixed_gender_team_penalty: Rating adjustment for MF teams in doubles
@@ -226,20 +240,23 @@ def generate_one_round(
     if weights is None:
         weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
 
+    if required_partners is None:
+        required_partners = {}
+
     all_players = list(player_ratings.keys())
     available_players = [p for p in all_players if p not in players_to_rest]
     random.shuffle(available_players)
 
     num_available = len(available_players)
-    players_needed = num_courts * players_per_court
 
-    if num_available < players_needed:
-        logger.error(
-            "Not enough players (%d) for the courts (%d needed)",
-            num_available,
-            players_needed,
-        )
-        return OptimizerResult(matches=None, partner_history=historical_partners)
+    # Auto-reduce courts if not enough players
+    max_courts = num_available // players_per_court
+    num_courts = min(num_courts, max_courts)
+
+    if num_courts == 0:
+        return OptimizerResult(matches=[], partner_history=historical_partners)
+
+    players_needed = num_courts * players_per_court
 
     # For singles mode, use simpler matching logic
     if not is_doubles:
@@ -279,10 +296,9 @@ def generate_one_round(
 
     # Exclude required partner pairs from pairing history penalty (they're forced anyway)
     locked_pairs_set: set[tuple[str, str]] = set()
-    if required_partners:
-        for player, partners in required_partners.items():
-            for partner in partners:
-                locked_pairs_set.add(tuple(sorted((player, partner))))
+    for player, partners in required_partners.items():
+        for partner in partners:
+            locked_pairs_set.add(tuple(sorted((player, partner))))
     total_pairing_objective = pulp.lpSum(
         t[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
         for pair in player_pairs
@@ -316,22 +332,33 @@ def generate_one_round(
             )
 
     # Hard constraints for required partners:
-    # If a player plays, at least one of their available required partners must be their partner
-    if required_partners:
-        for player, partners in required_partners.items():
-            if player not in available_players:
-                continue
-            # Filter to only available partners
-            available_partners = [p for p in partners if p in available_players]
-            if available_partners:
-                for c in range(num_courts):
-                    # If player plays on court c, at least one required partner must be with them
-                    prob += (
-                        pulp.lpSum(
-                            t[tuple(sorted((player, p)))][c] for p in available_partners
-                        )
-                        >= x[player][c]
-                    )
+    # If a player plays, they must be with a required partner,
+    # OR their required partners must be "validly occupied" with another mutual teammate.
+    for player, partners in required_partners.items():
+        if player not in available_players:
+            continue
+
+        # Filter to only available partners
+        active_partners = [p for p in partners if p in available_players]
+
+        if active_partners:
+            for c in range(num_courts):
+                satisfaction_terms = []
+                for p in active_partners:
+                    # 1. Direct partnership: Player is with Partner p
+                    satisfaction_terms.append(t[tuple(sorted((player, p)))][c])
+
+                    # 2. Indirect excuse: Partner p is with another Teammate k
+                    # If my partner is playing with another valid teammate, I am excused.
+                    p_partners = required_partners.get(p, set())
+                    for k in p_partners:
+                        if k != player and k in available_players:
+                            # Note: This may add duplicate terms if the friendship graph is dense
+                            # (e.g. triangle), but for boolean LP constraints (sum >= 1),
+                            # redundancy is harmless and ensures correctness.
+                            satisfaction_terms.append(t[tuple(sorted((p, k)))][c])
+
+                prob += pulp.lpSum(satisfaction_terms) >= x[player][c]
 
     for c in range(num_courts):
         for p in available_players:
@@ -409,7 +436,10 @@ def generate_one_round(
 
         if len(partnerships) == players_per_court / 2:
             for p1, p2 in partnerships:
-                updated_historical_partners[tuple(sorted((p1, p2)))] += 1
+                pair_key = tuple(sorted((p1, p2)))
+                updated_historical_partners[pair_key] = (
+                    updated_historical_partners.get(pair_key, 0) + 1
+                )
 
             team1 = partnerships[0]
             team2 = partnerships[1]

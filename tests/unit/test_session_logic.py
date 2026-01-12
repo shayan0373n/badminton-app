@@ -1,6 +1,6 @@
 import pytest
 from session_logic import ClubNightSession, Player
-from app_types import Gender
+from app_types import Gender, SinglesMatch, DoublesMatch
 
 
 def test_session_initialization(sample_players):
@@ -45,14 +45,14 @@ def test_finalize_round(sample_players):
     match = session.current_round_matches[0]
 
     # Mock winners
-    winners_by_court = {1: match["team_1"]}
+    winners_by_court = {1: match.team_1}
 
     session.finalize_round(winners_by_court)
 
     # Check that winners got points (default 1.0 for winning)
-    for name in match["team_1"]:
+    for name in match.team_1:
         assert session.player_pool[name].earned_rating == 1.0
-    for name in match["team_2"]:
+    for name in match.team_2:
         assert session.player_pool[name].earned_rating == 0.0
 
 
@@ -68,7 +68,7 @@ def test_add_player_mid_session(sample_players):
     # Play a round to accumulate some ratings
     session.prepare_round()
     match = session.current_round_matches[0]
-    session.finalize_round({1: match["team_1"]})
+    session.finalize_round({1: match.team_1})
 
     # Add new player
     success = session.add_player(name="NewPlayer", gender=Gender.MALE)
@@ -102,7 +102,7 @@ def test_remove_player_while_playing():
 
     # Find a player who is playing
     match = session.current_round_matches[0]
-    playing_player = match["team_1"][0]
+    playing_player = match.team_1[0]
 
     # Remove should queue, not immediately remove
     success, status = session.remove_player(playing_player)
@@ -111,7 +111,7 @@ def test_remove_player_while_playing():
     assert playing_player in session.player_pool  # Still there
 
     # After finalizing, player is removed
-    session.finalize_round({1: match["team_1"]})
+    session.finalize_round({1: match.team_1})
     assert playing_player not in session.player_pool
 
 
@@ -148,8 +148,8 @@ def test_update_courts_mid_session(sample_players):
     assert len(session.current_round_matches) == 2
     session.finalize_round(
         {
-            1: session.current_round_matches[0]["team_1"],
-            2: session.current_round_matches[1]["team_1"],
+            1: session.current_round_matches[0].team_1,
+            2: session.current_round_matches[1].team_1,
         }
     )
 
@@ -186,7 +186,7 @@ def test_multiple_rounds_all_succeed(sample_players):
         assert len(session.current_round_matches) == 2
 
         # Finalize with team_1 winning on all courts
-        winners = {i + 1: session.current_round_matches[i]["team_1"] for i in range(2)}
+        winners = {i + 1: session.current_round_matches[i].team_1 for i in range(2)}
         session.finalize_round(winners)
 
 
@@ -202,7 +202,7 @@ def test_resting_players_rotate_fairly(sample_players):
         for name in session.resting_players:
             rest_counts[name] += 1
 
-        session.finalize_round({1: session.current_round_matches[0]["team_1"]})
+        session.finalize_round({1: session.current_round_matches[0].team_1})
 
     # Each player should have rested exactly 4 times (4 rest per round, 8 rounds, 8 players)
     for name, count in rest_counts.items():
@@ -228,8 +228,9 @@ def test_session_singles_mode():
     assert len(session.current_round_matches) == 2
 
     for match in session.current_round_matches:
-        assert "player_1" in match
-        assert "player_2" in match
+        assert isinstance(match, SinglesMatch)
+        assert match.player_1 is not None
+        assert match.player_2 is not None
 
 
 # =============================================================================
@@ -244,7 +245,7 @@ def test_get_standings_sorted(sample_players):
     # Play a round
     session.prepare_round()
     match = session.current_round_matches[0]
-    session.finalize_round({1: match["team_1"]})
+    session.finalize_round({1: match.team_1})
 
     standings = session.get_standings()
 

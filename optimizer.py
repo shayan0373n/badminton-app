@@ -25,6 +25,8 @@ from app_types import (
     PlayerRatings,
     RequiredPartners,
     Gender,
+    SinglesMatch,
+    DoublesMatch,
 )
 
 logger = logging.getLogger("app.optimizer")
@@ -182,14 +184,11 @@ def generate_singles_round(
             )
 
             matches.append(
-                {
-                    "court": c + 1,
-                    "player_1": p1,
-                    "player_2": p2,
-                    "player_1_rating": player_ratings[p1],
-                    "player_2_rating": player_ratings[p2],
-                    "rating_diff": abs(player_ratings[p1] - player_ratings[p2]),
-                }
+                SinglesMatch(
+                    court=c + 1,
+                    player_1=p1,
+                    player_2=p2,
+                )
             )
 
     return OptimizerResult(matches=matches, partner_history=updated_historical_partners)
@@ -443,18 +442,13 @@ def generate_one_round(
 
             team1 = partnerships[0]
             team2 = partnerships[1]
-            team1_rating = player_ratings[team1[0]] + player_ratings[team1[1]]
-            team2_rating = player_ratings[team2[0]] + player_ratings[team2[1]]
 
             matches.append(
-                {
-                    "court": c + 1,
-                    "team_1": team1,
-                    "team_2": team2,
-                    "team_1_power": team1_rating,
-                    "team_2_power": team2_rating,
-                    "power_diff": abs(team1_rating - team2_rating),
-                }
+                DoublesMatch(
+                    court=c + 1,
+                    team_1=team1,
+                    team_2=team2,
+                )
             )
 
     return OptimizerResult(matches=matches, partner_history=updated_historical_partners)

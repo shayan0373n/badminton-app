@@ -46,7 +46,8 @@ from database import PlayerDB, SessionDB
 from session_logic import ClubNightSession, SessionManager, Player
 from app_types import Gender
 import session_service
-from player_registry import create_editor_dataframe, dataframe_to_players
+import player_service
+from player_service import create_editor_dataframe, dataframe_to_players
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -275,11 +276,14 @@ with tab2:
     )
 
     if st.button("💾 Save Registry to Cloud", type="secondary"):
-        # Process and save using the shared conversion function
+        # Process edited DataFrame into Player objects
         new_registry = dataframe_to_players(edited_reg_df)
 
         try:
-            PlayerDB.upsert_players(new_registry)
+            player_service.sync_registry_to_database(
+                old_registry=st.session_state.master_registry,
+                new_registry=new_registry,
+            )
             st.session_state.master_registry = new_registry
             st.success("Registry saved to Supabase!")
             st.rerun()

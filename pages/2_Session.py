@@ -18,7 +18,7 @@ from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
 from session_logic import ClubNightSession, Player, SessionManager
 import session_service
-from app_types import Gender
+from app_types import Gender, SinglesMatch, DoublesMatch
 
 logger = logging.getLogger("app.session_page")
 
@@ -52,24 +52,24 @@ def render_match_selection(
         with st.container(border=True):
             cols = st.columns([1, 3], vertical_alignment="center")
             with cols[0]:
-                st.markdown(f"#### Court {match['court']}")
+                st.markdown(f"#### Court {match.court}")
             with cols[1]:
                 if session.is_doubles:
                     winner = _render_doubles_match(match, locked_pairs_set)
                 else:
                     winner = _render_singles_match(match)
-                winners_by_court[match["court"]] = winner
+                winners_by_court[match.court] = winner
 
     return winners_by_court
 
 
-def _render_singles_match(match: dict) -> tuple[str, ...] | None:
+def _render_singles_match(match: SinglesMatch) -> tuple[str, ...] | None:
     """Renders a singles match selector and returns the winner."""
-    p1, p2 = match["player_1"], match["player_2"]
+    p1, p2 = match.player_1, match.player_2
     selection = st.segmented_control(
         "Select Winner",
         (p1, p2),
-        key=f"court_{match['court']}",
+        key=f"court_{match.court}",
         label_visibility="collapsed",
     )
     if selection == p1:
@@ -80,10 +80,10 @@ def _render_singles_match(match: dict) -> tuple[str, ...] | None:
 
 
 def _render_doubles_match(
-    match: dict, locked_pairs_set: set[tuple[str, str]]
+    match: DoublesMatch, locked_pairs_set: set[tuple[str, str]]
 ) -> tuple[str, ...] | None:
     """Renders a doubles match selector with lock indicators for fixed pairs."""
-    team_1, team_2 = match["team_1"], match["team_2"]
+    team_1, team_2 = match.team_1, match.team_2
     lock_icon = "🔗"
 
     # Build display names with lock indicators
@@ -98,7 +98,7 @@ def _render_doubles_match(
     selection = st.segmented_control(
         "Select Winner",
         (team_1_display, team_2_display),
-        key=f"court_{match['court']}",
+        key=f"court_{match.court}",
         label_visibility="collapsed",
     )
 
@@ -235,15 +235,13 @@ def _render_registry_player_add(
     if st.button("Add Member to Session", key="add_reg_btn"):
         if selected_name:
             p = master_registry[selected_name]
-            added = session.add_player(
-                name=p.name,
-                gender=p.gender,
-                mu=p.mu,
-                sigma=p.sigma,
+            added = session_service.add_player_from_registry(
+                session=session,
+                session_name=session_name,
+                player=p,
                 team_name=team_name.strip() if session.is_doubles else "",
             )
             if added:
-                SessionManager.save(session, session_name)
                 st.success(f"Added {selected_name} to the session!")
                 st.rerun()
         else:

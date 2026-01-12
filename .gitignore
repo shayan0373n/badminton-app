@@ -206,4 +206,4 @@ __marimo__/
 *.pkl
 
 # Agent configuration
-.agent/
+# .agent/

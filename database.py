@@ -107,6 +107,26 @@ class PlayerDB:
             logger.exception("Supabase API call failed: upsert_players")
             raise DatabaseError("Failed to save players to database") from e
 
+    @staticmethod
+    def delete_players_by_ids(player_ids: list[int]) -> None:
+        """Deletes players from the database by their IDs.
+
+        Args:
+            player_ids: List of database IDs for players to delete.
+
+        Raises:
+            DatabaseError: If the delete fails.
+        """
+        if not player_ids:
+            return
+
+        try:
+            supabase = get_supabase_client()
+            supabase.table("players").delete().in_("id", player_ids).execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: delete_players_by_ids")
+            raise DatabaseError("Failed to delete players from database") from e
+
 
 class SessionDB:
     """Handles session persistence in Supabase."""

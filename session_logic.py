@@ -342,7 +342,7 @@ class ClubNightSession:
 
         # 4. Update state
         self.historical_partners = result.partner_history
-        self.current_round_matches = sorted(matches, key=lambda m: m["court"])
+        self.current_round_matches = sorted(matches, key=lambda m: m.court)
 
         # 4. Rotate the rest queue for the next round
         self._rest_queue.rotate_after_round(self.resting_players)
@@ -484,11 +484,11 @@ class ClubNightSession:
         if self.current_round_matches:
             for match in self.current_round_matches:
                 if not self.is_doubles:
-                    if name in [match["player_1"], match["player_2"]]:
+                    if name in [match.player_1, match.player_2]:
                         is_playing = True
                         break
                 else:  # Doubles
-                    if name in match["team_1"] or name in match["team_2"]:
+                    if name in match.team_1 or name in match.team_2:
                         is_playing = True
                         break
 

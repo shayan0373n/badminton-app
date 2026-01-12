@@ -34,13 +34,13 @@ def record_matches_to_database(
         return
 
     for match in session.current_round_matches:
-        court_num = match["court"]
+        court_num = match.court
         winner = winners_by_court.get(court_num)
         if not winner:
             continue
 
         if session.is_doubles:
-            team_1, team_2 = match["team_1"], match["team_2"]
+            team_1, team_2 = match.team_1, match.team_2
             winner_side = 1 if set(winner) == set(team_1) else 2
             MatchDB.add_match(
                 session_id=session.database_id,
@@ -51,7 +51,7 @@ def record_matches_to_database(
                 player_4=team_2[1],
             )
         else:
-            p1, p2 = match["player_1"], match["player_2"]
+            p1, p2 = match.player_1, match.player_2
             winner_side = 1 if winner[0] == p1 else 2
             MatchDB.add_match(
                 session_id=session.database_id,
@@ -59,6 +59,38 @@ def record_matches_to_database(
                 player_2=p2,
                 winner_side=winner_side,
             )
+
+
+def add_player_from_registry(
+    session: ClubNightSession,
+    session_name: str,
+    player: Player,
+    team_name: str = "",
+) -> bool:
+    """
+    Adds a player from the registry to the current session and persists state.
+
+    Args:
+        session: The active session
+        session_name: Name of the session
+        player: The player object from the registry
+        team_name: Optional team name for doubles
+
+    Returns:
+        True if added successfully, False if player already exists in session.
+    """
+    added = session.add_player(
+        name=player.name,
+        gender=player.gender,
+        mu=player.mu,
+        sigma=player.sigma,
+        team_name=team_name,
+    )
+
+    if added:
+        SessionManager.save(session, session_name)
+
+    return added
 
 
 def add_guest_player(

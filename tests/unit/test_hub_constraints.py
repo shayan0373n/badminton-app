@@ -36,8 +36,8 @@ def test_hub_scenario_feasibility():
     # Verify partnerships
     # P1 must be with P2 or P3
     match = matches[0]
-    team1 = set(match["team_1"])
-    team2 = set(match["team_2"])
+    team1 = set(match.team_1)
+    team2 = set(match.team_2)
 
     # P1's partner
     p1_partner = None
@@ -89,7 +89,8 @@ def test_hub_forced_rest_feasibility():
     ), "Scenario with resting Hub should be feasible (spokes become free agents)"
     assert len(result.matches) == 1
 
-    playing = set(result.matches[0]["team_1"]) | set(result.matches[0]["team_2"])
+    match = result.matches[0]
+    playing = set(match.team_1) | set(match.team_2)
     assert "P2" in playing
     assert "P3" in playing
 
@@ -122,7 +123,7 @@ def test_triangle_scenario():
     # P3 is excused because P1 is with P2 (teammate) AND P2 is with P1 (teammate).
 
     matches = result.matches
-    teams = [set(m["team_1"]) for m in matches] + [set(m["team_2"]) for m in matches]
+    teams = [set(m.team_1) for m in matches] + [set(m.team_2) for m in matches]
 
     # Check if a triangle pair exists
     triangle_pairs = [{"P1", "P2"}, {"P2", "P3"}, {"P1", "P3"}]

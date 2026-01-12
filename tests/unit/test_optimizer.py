@@ -1,6 +1,6 @@
 import pytest
 from optimizer import generate_one_round
-from app_types import Gender
+from app_types import Gender, SinglesMatch, DoublesMatch
 from tests.utils import generate_random_players, run_optimizer_rounds
 
 
@@ -39,11 +39,11 @@ def test_generate_one_round_doubles(player_ratings, player_genders):
     matches = result.matches
     assert len(matches) == 2
     for match in matches:
-        assert isinstance(match, dict)
-        assert len(match["team_1"]) == 2
-        assert len(match["team_2"]) == 2
+        assert isinstance(match, DoublesMatch)
+        assert len(match.team_1) == 2
+        assert len(match.team_2) == 2
         # Check that all players in the match are unique
-        all_players = list(match["team_1"]) + list(match["team_2"])
+        all_players = list(match.team_1) + list(match.team_2)
         assert len(set(all_players)) == 4
 
 
@@ -65,10 +65,10 @@ def test_generate_one_round_singles(player_ratings, player_genders):
     matches = result.matches
     assert len(matches) == 2
     for match in matches:
-        assert isinstance(match, dict)
-        assert match["player_1"] in available_players
-        assert match["player_2"] in available_players
-        assert match["player_1"] != match["player_2"]
+        assert isinstance(match, SinglesMatch)
+        assert match.player_1 in available_players
+        assert match.player_2 in available_players
+        assert match.player_1 != match.player_2
 
 
 def test_optimizer_insufficient_players(player_ratings, player_genders):
@@ -117,7 +117,7 @@ def test_locked_pair_multi_round():
 
         # If P1 plays, P2 must be their partner
         for match in result.matches:
-            team1, team2 = set(match["team_1"]), set(match["team_2"])
+            team1, team2 = set(match.team_1), set(match.team_2)
             if "P1" in team1:
                 assert "P2" in team1, f"Round {round_num + 1}: P1 in {team1} without P2"
             elif "P1" in team2:
@@ -155,7 +155,7 @@ def test_square_graph_constraint():
 
         # Verify: if a group member plays, their partner must also be from the group
         for match in result.matches:
-            team1, team2 = set(match["team_1"]), set(match["team_2"])
+            team1, team2 = set(match.team_1), set(match.team_2)
 
             for team in [team1, team2]:
                 group_in_team = team & group
@@ -191,8 +191,8 @@ def test_singles_exact_players_for_one_court():
     assert result.success is True
     assert len(result.matches) == 1
     match = result.matches[0]
-    assert match["player_1"] != match["player_2"]
-    assert {match["player_1"], match["player_2"]} == {"P1", "P2"}
+    assert match.player_1 != match.player_2
+    assert {match.player_1, match.player_2} == {"P1", "P2"}
 
 
 def test_singles_multiple_courts():
@@ -217,8 +217,8 @@ def test_singles_multiple_courts():
     # All 4 unique players should be in matches
     all_players = set()
     for match in result.matches:
-        all_players.add(match["player_1"])
-        all_players.add(match["player_2"])
+        all_players.add(match.player_1)
+        all_players.add(match.player_2)
     assert len(all_players) == 4
 
 
@@ -266,7 +266,7 @@ def test_doubles_exact_players_for_one_court():
     assert result.success is True
     assert len(result.matches) == 1
     match = result.matches[0]
-    all_players = set(match["team_1"]) | set(match["team_2"])
+    all_players = set(match.team_1) | set(match.team_2)
     assert all_players == {"P1", "P2", "P3", "P4"}
 
 
@@ -291,8 +291,8 @@ def test_doubles_exact_players_for_two_courts():
     # All 8 unique players should be playing
     all_players = set()
     for match in result.matches:
-        all_players.update(match["team_1"])
-        all_players.update(match["team_2"])
+        all_players.update(match.team_1)
+        all_players.update(match.team_2)
     assert len(all_players) == 8
 
 
@@ -402,8 +402,8 @@ def test_no_duplicate_players_across_matches():
     # Collect all players
     all_players = []
     for match in result.matches:
-        all_players.extend(match["team_1"])
-        all_players.extend(match["team_2"])
+        all_players.extend(match.team_1)
+        all_players.extend(match.team_2)
 
     # No duplicates
     assert len(all_players) == len(

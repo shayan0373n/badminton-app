@@ -8,12 +8,11 @@ semantic meaning to complex type hints.
 
 from dataclasses import dataclass, field
 from typing import Any
+from enum import Enum
 
 # =============================================================================
 # Basic Type Aliases
 # =============================================================================
-
-from enum import Enum
 
 
 class Gender(str, Enum):
@@ -45,8 +44,44 @@ PartnerHistory = dict[PlayerPair, int]
 # Graph of required partner relationships (player -> set of players they must partner with)
 RequiredPartners = dict[PlayerName, set[PlayerName]]
 
-# A single match assignment (keys vary between singles/doubles)
-Match = dict[str, Any]
+
+# =============================================================================
+# Match Data Classes
+# =============================================================================
+
+
+@dataclass
+class SinglesMatch:
+    """A singles match assignment.
+
+    Attributes:
+        court: Court number (1-indexed)
+        player_1: First player's name
+        player_2: Second player's name
+    """
+
+    court: int
+    player_1: PlayerName
+    player_2: PlayerName
+
+
+@dataclass
+class DoublesMatch:
+    """A doubles match assignment.
+
+    Attributes:
+        court: Court number (1-indexed)
+        team_1: Tuple of player names for team 1
+        team_2: Tuple of player names for team 2
+    """
+
+    court: int
+    team_1: PlayerPair
+    team_2: PlayerPair
+
+
+# A single match assignment
+Match = SinglesMatch | DoublesMatch
 
 # List of match assignments for a round
 MatchList = list[Match]
@@ -73,45 +108,3 @@ class OptimizerResult:
 
     def __post_init__(self) -> None:
         self.success = self.matches is not None
-
-
-@dataclass
-class SinglesMatch:
-    """A singles match assignment.
-
-    Attributes:
-        court: Court number (1-indexed)
-        player_1: First player's name
-        player_2: Second player's name
-        player_1_rating: First player's rating
-        player_2_rating: Second player's rating
-        rating_diff: Absolute difference in ratings
-    """
-
-    court: int
-    player_1: PlayerName
-    player_2: PlayerName
-    player_1_rating: float
-    player_2_rating: float
-    rating_diff: float
-
-
-@dataclass
-class DoublesMatch:
-    """A doubles match assignment.
-
-    Attributes:
-        court: Court number (1-indexed)
-        team_1: Tuple of player names for team 1
-        team_2: Tuple of player names for team 2
-        team_1_power: Combined rating of team 1
-        team_2_power: Combined rating of team 2
-        power_diff: Absolute difference in team powers
-    """
-
-    court: int
-    team_1: PlayerPair
-    team_2: PlayerPair
-    team_1_power: float
-    team_2_power: float
-    power_diff: float

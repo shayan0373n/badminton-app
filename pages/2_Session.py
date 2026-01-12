@@ -17,6 +17,7 @@ from constants import PAGE_SETUP, TTT_DEFAULT_MU
 from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
 from session_logic import ClubNightSession, Player, SessionManager
+import session_service
 from app_types import Gender
 
 logger = logging.getLogger("app.session_page")
@@ -113,49 +114,6 @@ def _render_doubles_match(
 # =============================================================================
 
 
-def record_matches_to_database(
-    session: ClubNightSession, winners_by_court: dict[int, tuple[str, ...]]
-) -> None:
-    """Records completed matches to the database for rating updates.
-
-    Args:
-        session: The active session with current round matches
-        winners_by_court: Mapping of court numbers to winning teams
-
-    Raises:
-        DatabaseError: If match recording fails
-    """
-    if not session.current_round_matches or session.database_id is None:
-        return
-
-    for match in session.current_round_matches:
-        court_num = match["court"]
-        winner = winners_by_court.get(court_num)
-        if not winner:
-            continue
-
-        if session.is_doubles:
-            team_1, team_2 = match["team_1"], match["team_2"]
-            winner_side = 1 if set(winner) == set(team_1) else 2
-            MatchDB.add_match(
-                session_id=session.database_id,
-                player_1=team_1[0],
-                player_2=team_1[1],
-                winner_side=winner_side,
-                player_3=team_2[0],
-                player_4=team_2[1],
-            )
-        else:
-            p1, p2 = match["player_1"], match["player_2"]
-            winner_side = 1 if winner[0] == p1 else 2
-            MatchDB.add_match(
-                session_id=session.database_id,
-                player_1=p1,
-                player_2=p2,
-                winner_side=winner_side,
-            )
-
-
 def process_round_results(
     session: ClubNightSession,
     session_name: str,
@@ -175,23 +133,22 @@ def process_round_results(
         st.warning("Please select a winner for each court before submitting.")
         return False
 
-    # Record to database
-    if session.is_recorded:
-        if session.database_id is not None:
-            try:
-                record_matches_to_database(session, winners_by_court)
-            except DatabaseError as e:
-                st.warning(f"Could not record matches to cloud: {e}")
-        else:
-            st.warning(
-                "⚠️ Session not connected to database. "
-                "Matches will not be recorded for rating updates."
-            )
+    # Process round completion via service
+    try:
+        session_service.process_round_completion(
+            session, session_name, winners_by_court
+        )
+    except DatabaseError as e:
+        # Check if it was a partial failure (matches recorded but maybe not all?)
+        # Actually session_service raises before finalizing if recording fails,
+        # preventing state corruption.
+        st.warning(f"Could not record matches to cloud: {e}")
+        # Behavior decision: Do we stop or continue?
+        # Current logic allowed continuing but warned.
+        # The service method aborted.
+        # Let's assume strict consistency for now -> return False
+        return False
 
-    # Finalize and prepare next round
-    session.finalize_round(winners_by_court)
-    session.prepare_round()
-    SessionManager.save(session, session_name)
     return True
 
 
@@ -208,15 +165,17 @@ def render_court_controls(session: ClubNightSession, session_name: str) -> None:
 
         with col_add:
             if st.button("Add court", key="add_court_btn", width="stretch"):
-                session.update_courts(session.num_courts + 1)
-                SessionManager.save(session, session_name)
+                session_service.update_court_count(
+                    session, session_name, session.num_courts + 1
+                )
                 st.rerun()
 
         with col_remove:
             if st.button("Remove court", key="remove_court_btn", width="stretch"):
                 if session.num_courts > 1:
-                    session.update_courts(session.num_courts - 1)
-                    SessionManager.save(session, session_name)
+                    session_service.update_court_count(
+                        session, session_name, session.num_courts - 1
+                    )
                     st.rerun()
                 else:
                     st.info("Minimum 1 court.")
@@ -316,32 +275,23 @@ def _render_guest_player_add(session: ClubNightSession, session_name: str) -> No
             st.warning("Please enter a name.")
             return
 
-        guest = Player(
+        success, error_msg = session_service.add_guest_player(
+            session=session,
             name=new_name.strip(),
             gender=Gender(new_gender),
             mu=float(new_mu),
             team_name=new_team_name.strip(),
         )
 
-        added = session.add_player(
-            name=guest.name,
-            gender=guest.gender,
-            mu=guest.mu,
-            team_name=guest.team_name,
-        )
-
-        if added:
-            # Sync to cloud registry
-            try:
-                PlayerDB.upsert_players({guest.name: guest})
-            except DatabaseError:
-                st.error("Failed to sync guest to cloud registry.")
+        if success:
+            if error_msg:
+                st.warning(f"Guest added locally, but cloud sync failed: {error_msg}")
 
             SessionManager.save(session, session_name)
             st.success(f"Added {new_name} and saved to Member Registry!")
             st.rerun()
         else:
-            st.warning("A player with that name already exists.")
+            st.warning(error_msg or "Failed to add player.")
 
 
 def render_remove_player_section(session: ClubNightSession, session_name: str) -> None:
@@ -368,9 +318,10 @@ def render_remove_player_section(session: ClubNightSession, session_name: str) -
         )
 
         if st.button("Remove Player", key="mid_remove_btn", type="secondary"):
-            success, status = session.remove_player(player_to_remove)
+            success, status = session_service.remove_player_from_session(
+                session, session_name, player_to_remove
+            )
             if success:
-                SessionManager.save(session, session_name)
                 if status == "immediate":
                     st.success(f"✅ Removed {player_to_remove} from the session.")
                 elif status == "queued":

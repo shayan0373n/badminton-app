@@ -45,6 +45,8 @@ from constants import (
 from database import PlayerDB, SessionDB
 from session_logic import ClubNightSession, SessionManager, Player
 from app_types import Gender
+import session_service
+from player_registry import create_editor_dataframe, dataframe_to_players
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -96,29 +98,7 @@ def generate_session_name() -> str:
     return f"{word}-{timestamp}"
 
 
-# Helper function to create editor DataFrame from player_table
-def create_editor_dataframe(
-    player_table: dict[str, Player], is_doubles: bool = DEFAULT_IS_DOUBLES
-) -> pd.DataFrame:
-    """Creates a DataFrame for the editor from player_table."""
-    player_ranks = range(1, len(player_table) + 1)
-    df_data = {
-        "#": player_ranks,
-        "Player Name": [p.name for p in player_table.values()],
-        "Gender": [p.gender for p in player_table.values()],
-        "Prior Mu": [p.prior_mu for p in player_table.values()],
-        "Mu": [p.mu for p in player_table.values()],
-        "Sigma": [p.sigma for p in player_table.values()],
-        "Rating": [p.conservative_rating for p in player_table.values()],
-        "database_id": [p.database_id for p in player_table.values()],  # Track DB ID
-    }
-    # Only add Team Name column for Doubles mode
-    if is_doubles:
-        df_data["Team Name"] = [
-            p.team_name if hasattr(p, "team_name") else ""
-            for p in player_table.values()
-        ]
-    return pd.DataFrame(df_data)
+# create_editor_dataframe is imported from player_registry
 
 
 def validate_session_setup(
@@ -151,29 +131,21 @@ def start_session(
     Raises:
         Stops execution via st.stop() if database session cannot be created.
     """
-    # Create session record in Supabase only if recording is enabled
-    database_id = None
-    if is_recorded:
-        try:
-            database_id = SessionDB.create_session(session_name, is_doubles)
-        except Exception as e:
-            st.error(f"Could not create session in database: {e}")
-            st.stop()
-
-    session = ClubNightSession(
-        players=player_table,
-        num_courts=num_courts,
-        database_id=database_id,
-        weights=weights,
-        female_female_team_penalty=female_female_team_penalty,
-        mixed_gender_team_penalty=mixed_gender_team_penalty,
-        female_singles_penalty=female_singles_penalty,
-        is_doubles=is_doubles,
-        is_recorded=is_recorded,
-    )
-    session.prepare_round()
-
-    SessionManager.save(session, session_name)
+    try:
+        session = session_service.create_new_session(
+            player_table=player_table,
+            num_courts=num_courts,
+            weights=weights,
+            female_female_team_penalty=female_female_team_penalty,
+            mixed_gender_team_penalty=mixed_gender_team_penalty,
+            female_singles_penalty=female_singles_penalty,
+            session_name=session_name,
+            is_doubles=is_doubles,
+            is_recorded=is_recorded,
+        )
+    except Exception as e:
+        st.error(f"Could not create session in database: {e}")
+        st.stop()
     st.session_state.session = session
     st.session_state.current_session_name = session_name
 
@@ -303,26 +275,8 @@ with tab2:
     )
 
     if st.button("💾 Save Registry to Cloud", type="secondary"):
-        # Process and save
-        new_registry = {}
-        for _, row in edited_reg_df.dropna(subset=["Player Name"]).iterrows():
-            # Preserve database_id if it exists (for existing players)
-            db_id = row.get("database_id")
-            # Handle NaN values - convert to None
-            if pd.isna(db_id):
-                db_id = None
-            else:
-                db_id = int(db_id)
-
-            new_registry[row["Player Name"]] = Player(
-                name=row["Player Name"],
-                gender=Gender(row["Gender"]),
-                prior_mu=float(row["Prior Mu"]),
-                prior_sigma=TTT_DEFAULT_SIGMA,  # Fixed for now
-                mu=float(row["Mu"]),
-                sigma=float(row["Sigma"]),
-                database_id=db_id,  # Preserve DB ID for proper updates
-            )
+        # Process and save using the shared conversion function
+        new_registry = dataframe_to_players(edited_reg_df)
 
         try:
             PlayerDB.upsert_players(new_registry)

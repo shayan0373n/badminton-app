@@ -332,6 +332,54 @@ def render_remove_player_section(session: ClubNightSession, session_name: str) -
                 st.error(f"Player {player_to_remove} not found.")
 
 
+def render_weights_section(session: ClubNightSession, session_name: str) -> None:
+    """Renders the optimizer weights adjustment section."""
+    with st.expander("⚖️ Optimizer Weights", expanded=False):
+        st.caption("Higher = more important. Changes apply to next round.")
+
+        skill = st.number_input(
+            "Skill Balance",
+            min_value=0.0,
+            max_value=10.0,
+            value=float(session.weights.get("skill", 1.0)),
+            step=0.5,
+            key="weight_skill",
+            help="Group similar skill levels on the same court",
+        )
+        power = st.number_input(
+            "Team Power Balance",
+            min_value=0.0,
+            max_value=10.0,
+            value=float(session.weights.get("power", 1.0)),
+            step=0.5,
+            key="weight_power",
+            help="Balance team strength within each court",
+        )
+        pairing = st.number_input(
+            "Pairing Variety",
+            min_value=0.0,
+            max_value=10.0,
+            value=float(session.weights.get("pairing", 1.0)),
+            step=0.5,
+            key="weight_pairing",
+            help="Avoid repeating player matchups",
+        )
+
+        # Only update if values changed
+        current = session.weights
+        if (
+            skill != current.get("skill")
+            or power != current.get("power")
+            or pairing != current.get("pairing")
+        ):
+            if st.button("Apply Weights", key="apply_weights_btn"):
+                session_service.update_weights(
+                    session, session_name, skill, power, pairing
+                )
+                st.success("Weights updated!")
+                st.rerun()
+
+
 def handle_session_termination(session: ClubNightSession, session_name: str) -> None:
     """Handles session termination with state preservation."""
     if not st.button("⚠️ Terminate Session"):
@@ -427,4 +475,5 @@ with st.sidebar:
     render_court_controls(session, session_name)
     render_add_player_section(session, session_name)
     render_remove_player_section(session, session_name)
+    render_weights_section(session, session_name)
     handle_session_termination(session, session_name)

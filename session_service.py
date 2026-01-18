@@ -185,6 +185,31 @@ def update_court_count(
     SessionManager.save(session, session_name)
 
 
+def update_weights(
+    session: ClubNightSession,
+    session_name: str,
+    skill: float,
+    power: float,
+    pairing: float,
+) -> None:
+    """
+    Updates the optimizer weights and persists the change.
+
+    Args:
+        session: The active session
+        session_name: Name of the session (for saving)
+        skill: Weight for skill balance objective
+        power: Weight for team power balance objective
+        pairing: Weight for court history/pairing variety objective
+    """
+    session.weights = {
+        "skill": skill,
+        "power": power,
+        "pairing": pairing,
+    }
+    SessionManager.save(session, session_name)
+
+
 def process_round_completion(
     session: ClubNightSession,
     session_name: str,

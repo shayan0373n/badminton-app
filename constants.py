@@ -36,11 +36,11 @@ OPTIMIZER_BIG_M = 1000.0
 # =============================================================================
 DEFAULT_NUM_COURTS = 2
 
-# Default optimizer weights
+# Default optimizer weights (all 1 = equal importance)
 DEFAULT_WEIGHTS = {
     "skill": 1,
-    "power": 3,
-    "pairing": 2,
+    "power": 1,
+    "pairing": 1,
 }
 
 # =============================================================================

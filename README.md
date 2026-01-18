@@ -5,14 +5,14 @@ A Streamlit-based application for organizing badminton club night sessions with 
 ## Features
 
 - **Smart Match Optimization**: Uses Gurobi to solve a multi-objective integer linear program (ILP) that minimizes a weighted combination of:
-  - *Skill spread* — difference between the strongest and weakest player on each court
-  - *Team power imbalance* — difference in combined ratings between opposing teams (doubles)
-  - *Partner repetition* — penalizes frequently repeated pairings to encourage variety
+  - *Skill spread* — difference between the strongest and weakest player on each court (uses tier ratings)
+  - *Team power imbalance* — difference in combined ratings between opposing teams (uses real skills)
+  - *Court repetition* — penalizes players who frequently share a court to encourage variety
 - **TrueSkill Through Time Ratings**: Player skill tracking with uncertainty-aware ratings that improve over time
 - **Flexible Game Modes**: Support for both singles and doubles matches
 - **Session Management**: Create, pause, resume, and track multiple sessions
 - **Player Registry**: Persistent player database with customizable prior skill estimates
-- **Gender Balancing**: Optional penalties for team compositions to encourage mixed-gender play
+- **Organic Gender Balancing**: Uses Z-score normalized tier ratings so top females group with top males naturally, without hard-coded penalties
 
 ## Tech Stack
 
@@ -52,6 +52,7 @@ A Streamlit-based application for organizing badminton club night sessions with 
 │   └── 2_Session.py     # Active session management UI
 ├── session_logic.py     # Core session and player logic
 ├── optimizer.py         # Match generation optimization
+├── rating_service.py    # Tier rating and real skill computation
 ├── database.py          # Supabase database operations
 ├── recalculate_ratings.py # TTT rating recalculation
 └── constants.py         # Application constants

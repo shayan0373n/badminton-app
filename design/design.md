@@ -16,7 +16,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 │             1_Setup.py, pages/2_Session.py               │
 ├─────────────────────────────────────────────────────────┤
 │                    Service Layer                         │
-│       session_service.py, player_service.py              │
+│  session_service.py, player_service.py, rating_service.py│
 │   (Orchestrates domain logic + database interactions)    │
 ├─────────────────────────────────────────────────────────┤
 │                    Domain Layer                          │
@@ -46,6 +46,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 |------|---------|
 | `session_service.py` | Orchestrates session operations (create, record matches, add/remove players). Bridges UI and domain/database layers. |
 | `player_service.py` | Handles player registry management. Converts between `Player` objects and DataFrames for the UI, and synchronizes changes to the database. |
+| `rating_service.py` | Computes tier ratings (Z-score normalized for court grouping) and real skills (raw normalized for team fairness). Implements organic gender balancing via statistics. |
 
 ### Domain Layer
 
@@ -53,8 +54,8 @@ The app follows a **layered architecture** with clear separation of concerns:
 |------|---------|
 | `session_logic.py` | Core domain logic. Contains `Player`, `SessionManager`, `RestRotationQueue`, and `ClubNightSession` classes. No DB calls. |
 | `optimizer.py` | Match optimization using PuLP/Gurobi. `generate_one_round()` for doubles, `generate_singles_round()` for singles. |
-| `app_types.py` | Type aliases and dataclasses (`Gender`, `OptimizerResult`, `SinglesMatch`, `DoublesMatch`, etc.). |
-| `constants.py` | All configuration constants (TrueSkill params, optimizer settings, penalties, defaults). |
+| `app_types.py` | Type aliases and dataclasses (`Gender`, `OptimizerResult`, `SinglesMatch`, `DoublesMatch`, `TierRatings`, `RealSkills`, `GenderStats`, etc.). |
+| `constants.py` | All configuration constants (TrueSkill params, optimizer settings, fallback gender stats, defaults). |
 | `exceptions.py` | Domain exceptions: `DatabaseError`, `SessionError`, `OptimizerError`, `ValidationError`. |
 
 ### Infrastructure Layer
@@ -84,7 +85,7 @@ A dataclass representing a player with TrueSkill ratings:
 
 ### `ClubNightSession` (session_logic.py)
 Orchestrates a club night session:
-- Holds the player table, round state, partner history
+- Holds the player table, round state, court history
 - Delegates match generation to the optimizer
 - Methods: `prepare_round()`, `finalize_round()`, `add_player()`, `remove_player()`
 
@@ -113,7 +114,7 @@ All use `@staticmethod` and translate Supabase exceptions to `DatabaseError`:
 
 ### Type Hints
 - Extensive type hints throughout codebase
-- Use type aliases from `app_types.py` for readability (e.g. `PlayerName`, `PlayerPair`, `PartnerHistory`)
+- Use type aliases from `app_types.py` for readability (e.g. `PlayerName`, `PlayerPair`, `CourtHistory`)
 
 ### Logging
 - Use `logging.getLogger("app.<module_name>")` pattern
@@ -136,13 +137,14 @@ Tests are in `tests/` and use pytest:
 
 ```
 tests/
-├── conftest.py         # Shared fixtures (sample_players, player_ratings, etc.)
+├── conftest.py         # Shared fixtures (sample_players, sample_gender_stats, etc.)
 ├── utils.py            # Test utilities (generate_random_players, run_optimizer_rounds)
 ├── unit/
 │   ├── test_optimizer.py
 │   ├── test_session_logic.py
 │   ├── test_rest_rotation_queue.py
-│   └── test_hub_constraints.py
+│   ├── test_hub_constraints.py
+│   └── test_rating_service.py
 ├── integration/        # (Integration tests)
 └── e2e/                # (End-to-end tests)
 ```
@@ -162,7 +164,7 @@ pytest
 
 1. **Setup Page** (`1_Setup.py`)
    - Load/edit player registry from database
-   - Configure courts, weights, penalties
+   - Configure courts and optimizer weights
    - Click "Start Session" → calls `session_service.create_new_session()`
 
 2. **Session Page** (`pages/2_Session.py`)
@@ -186,9 +188,11 @@ The service layer (`*_service.py`) exists to:
 3. Enable testing of business logic without mocking DB
 
 ### Optimizer Contract
-- Input ratings are scaled to 0-5 range for stable optimization
-- Output is `OptimizerResult` with `matches`, `partner_history`, `success`
-- Gender penalties adjust effective "power" for balancing
+- Uses **decoupled inputs** for different optimization objectives:
+  - `tier_ratings` (Z-score normalized): Used for court grouping (skill spread minimization)
+  - `real_skills` (raw normalized 0-5): Used for team fairness (power balance)
+- This enables **organic gender balancing**: top females map to same tier as top males
+- Output is `OptimizerResult` with `matches`, `court_history`, `success`
 
 ### TrueSkill Through Time
 - Uses local `TrueSkillThroughTime.py/` library

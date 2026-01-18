@@ -15,20 +15,19 @@ from itertools import combinations
 
 from constants import (
     DEFAULT_IS_DOUBLES,
-    OPTIMIZER_SKILL_RANGE,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
-    TTT_MU_BAD,
-    TTT_MU_GOOD,
 )
 from exceptions import SessionError
 from optimizer import generate_one_round
+from rating_service import prepare_optimizer_ratings
 from app_types import (
     Gender,
+    GenderStats,
     MatchList,
-    PartnerHistory,
+    CourtHistory,
     PlayerName,
     PlayerPair,
     RequiredPartners,
@@ -224,16 +223,15 @@ class ClubNightSession:
         self,
         players: dict[str, Player],
         num_courts: int,
+        gender_stats: GenderStats,
         weights: dict[str, float] | None = None,
-        female_female_team_penalty: float = 0,
-        mixed_gender_team_penalty: float = 0,
-        female_singles_penalty: float = 0,
         is_doubles: bool = True,
         database_id: int | None = None,
         is_recorded: bool = True,
     ) -> None:
         self.player_pool = players
         self.num_courts = num_courts
+        self._gender_stats = gender_stats
         self.database_id = database_id
         self.is_doubles = is_doubles
         self.is_recorded = is_recorded
@@ -241,12 +239,9 @@ class ClubNightSession:
             PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
         )
         self.round_num = 0
-        self.female_female_team_penalty = female_female_team_penalty
-        self.mixed_gender_team_penalty = mixed_gender_team_penalty
-        self.female_singles_penalty = female_singles_penalty
 
         # State required for the optimizer
-        self.historical_partners: PartnerHistory = defaultdict(int)
+        self.court_history: CourtHistory = defaultdict(int)
         self.weights = (
             weights
             if weights is not None
@@ -306,29 +301,20 @@ class ClubNightSession:
         max_courts = total_players // self.players_per_court
         active_courts = min(self.num_courts, max_courts)
 
-        # 1. Prepare raw data and Normalize ratings (0-5 scale) for optimizer stability
-        original_ratings = {p.name: p.rating for p in self.player_pool.values()}
+        # Prepare dual ratings: tier (for grouping) and real skill (for fairness)
         player_genders = {p.name: p.gender for p in self.player_pool.values()}
+        tier_ratings, real_skills = prepare_optimizer_ratings(
+            self.player_pool, self._gender_stats
+        )
 
-        # Normalize using fixed anchors for consistency across sessions
-        # A player with TTT_MU_BAD (18) maps to 0, TTT_MU_GOOD (32) maps to 5
-        # Values outside this range extrapolate (e.g., mu=39 -> 7.5)
-        rating_range = TTT_MU_GOOD - TTT_MU_BAD
-        normalized_ratings = {
-            n: (r - TTT_MU_BAD) / rating_range * OPTIMIZER_SKILL_RANGE
-            for n, r in original_ratings.items()
-        }
-
-        # 2. Call the purified optimizer
+        # Call the optimizer with decoupled inputs
         result = generate_one_round(
-            player_ratings=normalized_ratings,
+            tier_ratings=tier_ratings,
+            real_skills=real_skills,
             player_genders=player_genders,
             players_to_rest=self.resting_players,
             num_courts=active_courts,
-            historical_partners=self.historical_partners,
-            female_female_team_penalty=self.female_female_team_penalty,
-            mixed_gender_team_penalty=self.mixed_gender_team_penalty,
-            female_singles_penalty=self.female_singles_penalty,
+            court_history=self.court_history,
             players_per_court=self.players_per_court,
             is_doubles=self.is_doubles,
             required_partners=required_partners,
@@ -341,7 +327,7 @@ class ClubNightSession:
         matches = result.matches
 
         # 4. Update state
-        self.historical_partners = result.partner_history
+        self.court_history = result.court_history
         self.current_round_matches = sorted(matches, key=lambda m: m.court)
 
         # 4. Rotate the rest queue for the next round
@@ -400,9 +386,7 @@ class ClubNightSession:
             "is_doubles": self.is_doubles,
             "is_recorded": self.is_recorded,
             "weights": self.weights.copy(),
-            "female_female_team_penalty": self.female_female_team_penalty,
-            "mixed_gender_team_penalty": self.mixed_gender_team_penalty,
-            "female_singles_penalty": self.female_singles_penalty,
+            "gender_stats": self._gender_stats,
         }
 
     def add_player(

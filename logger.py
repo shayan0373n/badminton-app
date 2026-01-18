@@ -62,7 +62,7 @@ def log_optimizer_debug(
     max_rating_on_court: dict,
     min_rating_on_court: dict,
     total_skill_objective: float,
-    total_pairing_objective: float,
+    total_court_history_objective: float,
     objective_value: float,
     max_team_power: dict | None = None,
     min_team_power: dict | None = None,
@@ -77,7 +77,7 @@ def log_optimizer_debug(
         max_rating_on_court: Dict of max ratings per court
         min_rating_on_court: Dict of min ratings per court
         total_skill_objective: Total skill objective value
-        total_pairing_objective: Total pairing objective value
+        total_court_history_objective: Total court history objective value
         objective_value: Final objective value
         max_team_power: Optional dict of max team power per court (doubles only)
         min_team_power: Optional dict of min team power per court (doubles only)
@@ -106,5 +106,5 @@ def log_optimizer_debug(
     logger.debug("Total Skill Objective: %s", total_skill_objective)
     if total_power_objective is not None:
         logger.debug("Total Power Objective: %s", total_power_objective)
-    logger.debug("Total Pairing Objective: %s", total_pairing_objective)
+    logger.debug("Total Court History Objective: %s", total_court_history_objective)
     logger.debug("Objective Value: %s", objective_value)

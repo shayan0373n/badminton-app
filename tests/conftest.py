@@ -1,6 +1,7 @@
 import pytest
 import os
-from app_types import Gender
+from app_types import Gender, GenderStats
+from rating_service import compute_gender_statistics
 from session_logic import Player
 
 
@@ -31,6 +32,12 @@ def sample_players():
             name="Heidi", gender=Gender.FEMALE, prior_mu=28.0, prior_sigma=8.33
         ),
     }
+
+
+@pytest.fixture
+def sample_gender_stats(sample_players) -> GenderStats:
+    """Returns gender statistics computed from sample_players."""
+    return compute_gender_statistics(sample_players)
 
 
 @pytest.fixture

@@ -18,15 +18,15 @@ from logger import log_optimizer_debug
 from app_types import (
     MatchList,
     OptimizerResult,
-    PartnerHistory,
+    CourtHistory,
     PlayerGenders,
     PlayerName,
     PlayerPair,
-    PlayerRatings,
+    RealSkills,
     RequiredPartners,
-    Gender,
     SinglesMatch,
     DoublesMatch,
+    TierRatings,
 )
 
 logger = logging.getLogger("app.optimizer")
@@ -38,31 +38,27 @@ logger = logging.getLogger("app.optimizer")
 def generate_singles_round(
     available_players: list[PlayerName],
     num_courts: int,
-    player_ratings: PlayerRatings,
-    player_genders: PlayerGenders,
-    historical_partners: PartnerHistory,
-    female_singles_penalty: float = 0,
+    real_skills: RealSkills,
+    court_history: CourtHistory,
     weights: dict[str, float] | None = None,
 ) -> OptimizerResult:
     """
     Generates a singles round with 1v1 matches.
 
     Uses simpler optimization focusing on skill balance and opponent history.
-    The female_singles_penalty reduces each female player's effective rating for power balance.
+    Matches players with similar real skills for competitive 1v1 games.
 
     Args:
         available_players: List of player names available to play
         num_courts: Number of courts to fill. If more courts are requested than
             players can fill, the optimizer will auto-reduce to the maximum
             feasible number of courts.
-        player_ratings: Dict mapping player names to their normalized ratings
-        player_genders: Dict mapping player names to 'M' or 'F'
-        historical_partners: Dict tracking how often player pairs have faced each other
-        female_singles_penalty: Rating adjustment for female players (typically negative)
+        real_skills: Dict mapping player names to their real skill ratings (0-5 scale)
+        court_history: Dict tracking how often player pairs have shared a court
         weights: Dict with 'skill', 'power', 'pairing' weight values
 
     Returns:
-        OptimizerResult with matches and updated partner history
+        OptimizerResult with matches and updated court history
     """
     if weights is None:
         weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
@@ -72,17 +68,7 @@ def generate_singles_round(
     num_courts = min(num_courts, max_courts)
 
     if num_courts == 0:
-        return OptimizerResult(matches=[], partner_history=historical_partners)
-
-    # Apply female penalty to female players' ratings (using normalized values for math)
-    normalized_adjusted: PlayerRatings = {}
-    for p in available_players:
-        if player_genders[p] == Gender.FEMALE:
-            normalized_adjusted[p] = (
-                player_ratings[p] + female_singles_penalty
-            )  # female_singles_penalty is relative to 0-5 scale
-        else:
-            normalized_adjusted[p] = player_ratings[p]
+        return OptimizerResult(matches=[], court_history=court_history)
 
     prob = pulp.LpProblem("Badminton_Singles_Optimizer", pulp.LpMinimize)
 
@@ -104,16 +90,16 @@ def generate_singles_round(
         max_rating_on_court[c] - min_rating_on_court[c] for c in range(num_courts)
     )
 
-    # Opponent history objective (minimize playing same opponents)
-    total_pairing_objective = pulp.lpSum(
-        o[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
+    # Court history objective (minimize sharing court with same players)
+    total_court_history_objective = pulp.lpSum(
+        o[pair][c] * court_history.get(tuple(sorted(pair)), 0)
         for pair in player_pairs
         for c in range(num_courts)
     )
 
     prob += (
         weights["skill"] * total_skill_objective
-        + weights["pairing"] * total_pairing_objective
+        + weights["pairing"] * total_court_history_objective
     ), "Minimize_Weighted_Objectives"
 
     # Constraints: exactly 2 players per court
@@ -137,15 +123,15 @@ def generate_singles_round(
             prob += o[(p1, p2)][c] <= x[p2][c]
             prob += o[(p1, p2)][c] >= x[p1][c] + x[p2][c] - 1
 
-    # Skill balance constraints
+    # Skill balance constraints (use real_skills for competitive matchups)
     for c in range(num_courts):
         for p in available_players:
-            prob += max_rating_on_court[c] >= normalized_adjusted[
-                p
-            ] - OPTIMIZER_BIG_M * (1 - x[p][c])
-            prob += min_rating_on_court[c] <= normalized_adjusted[
-                p
-            ] + OPTIMIZER_BIG_M * (1 - x[p][c])
+            prob += max_rating_on_court[c] >= real_skills[p] - OPTIMIZER_BIG_M * (
+                1 - x[p][c]
+            )
+            prob += min_rating_on_court[c] <= real_skills[p] + OPTIMIZER_BIG_M * (
+                1 - x[p][c]
+            )
 
     # Solve
     solver = pulp.GUROBI(msg=False, timeLimit=10)
@@ -156,7 +142,7 @@ def generate_singles_round(
             "No optimal solution found for singles. Status: %s",
             pulp.LpStatus[prob.status],
         )
-        return OptimizerResult(matches=None, partner_history=historical_partners)
+        return OptimizerResult(matches=None, court_history=court_history)
 
     # Log debug info
     log_optimizer_debug(
@@ -165,13 +151,13 @@ def generate_singles_round(
         max_rating_on_court=max_rating_on_court,
         min_rating_on_court=min_rating_on_court,
         total_skill_objective=pulp.value(total_skill_objective),
-        total_pairing_objective=pulp.value(total_pairing_objective),
+        total_court_history_objective=pulp.value(total_court_history_objective),
         objective_value=pulp.value(prob.objective),
     )
 
     # Build matches
     matches = []
-    updated_historical_partners = historical_partners.copy()
+    updated_court_history = court_history.copy()
 
     for c in range(num_courts):
         court_players = [p for p in available_players if x[p][c].value() > 0.5]
@@ -179,8 +165,8 @@ def generate_singles_round(
         if len(court_players) == 2:
             p1, p2 = sorted(court_players)
             pair_key = tuple(sorted((p1, p2)))
-            updated_historical_partners[pair_key] = (
-                updated_historical_partners.get(pair_key, 0) + 1
+            updated_court_history[pair_key] = (
+                updated_court_history.get(pair_key, 0) + 1
             )
 
             matches.append(
@@ -191,21 +177,19 @@ def generate_singles_round(
                 )
             )
 
-    return OptimizerResult(matches=matches, partner_history=updated_historical_partners)
+    return OptimizerResult(matches=matches, court_history=updated_court_history)
 
 
 # ============================================================================
 # Doubles mode and main entry point
 # ============================================================================
 def generate_one_round(
-    player_ratings: PlayerRatings,
+    tier_ratings: TierRatings,
+    real_skills: RealSkills,
     player_genders: PlayerGenders,
     players_to_rest: set[PlayerName],
     num_courts: int,
-    historical_partners: PartnerHistory,
-    female_female_team_penalty: float = 0,
-    mixed_gender_team_penalty: float = 0,
-    female_singles_penalty: float = 0,
+    court_history: CourtHistory,
     players_per_court: int = 4,
     weights: dict[str, float] | None = None,
     is_doubles: bool = True,
@@ -216,25 +200,27 @@ def generate_one_round(
 
     Supports both Doubles (4 players per court) and Singles (2 players per court).
 
+    Uses decoupled inputs for different objectives:
+    - tier_ratings: Z-score normalized ratings for court grouping (social hierarchy)
+    - real_skills: Direct normalized ratings for team fairness (win probability)
+
     Args:
-        player_ratings: Dict mapping player names to normalized ratings (0-5 scale)
+        tier_ratings: Dict mapping player names to tier ratings (Z-score normalized, 0-5 scale)
+        real_skills: Dict mapping player names to real skill ratings (direct normalized, 0-5 scale)
         player_genders: Dict mapping player names to 'M' or 'F'
         players_to_rest: Set of player names who should rest this round
         num_courts: Number of courts to fill. If more courts are requested than
             available players can fill, the optimizer will auto-reduce to the
             maximum feasible number. Check len(result.matches) to see actual
             courts used.
-        historical_partners: Dict tracking partner history
-        female_female_team_penalty: Rating adjustment for FF teams in doubles
-        mixed_gender_team_penalty: Rating adjustment for MF teams in doubles
-        female_singles_penalty: Rating adjustment for female players in singles
+        court_history: Dict tracking how often player pairs have shared a court
         players_per_court: Number of players per court (2 for singles, 4 for doubles)
         weights: Dict with 'skill', 'power', 'pairing' weight values
         is_doubles: True for doubles mode, False for singles mode
         required_partners: Optional dict mapping players to their required partners (doubles only)
 
     Returns:
-        OptimizerResult with matches and updated partner history
+        OptimizerResult with matches and updated court history
     """
     if weights is None:
         weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
@@ -242,7 +228,7 @@ def generate_one_round(
     if required_partners is None:
         required_partners = {}
 
-    all_players = list(player_ratings.keys())
+    all_players = list(tier_ratings.keys())
     available_players = [p for p in all_players if p not in players_to_rest]
     random.shuffle(available_players)
 
@@ -253,7 +239,7 @@ def generate_one_round(
     num_courts = min(num_courts, max_courts)
 
     if num_courts == 0:
-        return OptimizerResult(matches=[], partner_history=historical_partners)
+        return OptimizerResult(matches=[], court_history=court_history)
 
     players_needed = num_courts * players_per_court
 
@@ -262,10 +248,8 @@ def generate_one_round(
         return generate_singles_round(
             available_players,
             num_courts,
-            player_ratings,
-            player_genders,
-            historical_partners,
-            female_singles_penalty,
+            real_skills,
+            court_history,
             weights,
         )
 
@@ -280,6 +264,10 @@ def generate_one_round(
     t = pulp.LpVariable.dicts(
         "Partners", (player_pairs, range(num_courts)), cat="Binary"
     )
+    # s: Binary variable indicating if a pair of players share the same court
+    s = pulp.LpVariable.dicts(
+        "SameCourt", (player_pairs, range(num_courts)), cat="Binary"
+    )
 
     max_rating_on_court = pulp.LpVariable.dicts("MaxRatingOnCourt", range(num_courts))
     min_rating_on_court = pulp.LpVariable.dicts("MinRatingOnCourt", range(num_courts))
@@ -293,22 +281,24 @@ def generate_one_round(
         max_team_power[c] - min_team_power[c] for c in range(num_courts)
     )
 
-    # Exclude required partner pairs from pairing history penalty (they're forced anyway)
+    # Exclude required partner pairs from court history penalty (they're forced anyway)
     locked_pairs_set: set[tuple[str, str]] = set()
     for player, partners in required_partners.items():
         for partner in partners:
             locked_pairs_set.add(tuple(sorted((player, partner))))
-    total_pairing_objective = pulp.lpSum(
-        t[pair][c] * historical_partners.get(tuple(sorted(pair)), 0)
+    # Court history objective: penalize all pairs sharing a court (partners + opponents)
+    # Divided by 3 to normalize: 6 pairs per court / 3 = 2 (same scale as old partner history)
+    total_court_history_objective = pulp.lpSum(
+        s[pair][c] * court_history.get(tuple(sorted(pair)), 0)
         for pair in player_pairs
         for c in range(num_courts)
         if tuple(sorted(pair)) not in locked_pairs_set
-    )
+    ) / 3
 
     prob += (
         weights["skill"] * total_skill_objective
         + weights["power"] * total_power_objective
-        + weights["pairing"] * total_pairing_objective
+        + weights["pairing"] * total_court_history_objective
     ), "Minimize_Weighted_Objectives"
 
     for c in range(num_courts):
@@ -329,6 +319,13 @@ def generate_one_round(
             prob += (
                 pulp.lpSum(t[pair][c] for pair in player_pairs if p in pair) == x[p][c]
             )
+
+    # Link same-court variables: s[pair][c] = 1 iff both players are on court c
+    for p1, p2 in player_pairs:
+        for c in range(num_courts):
+            prob += s[(p1, p2)][c] <= x[p1][c]
+            prob += s[(p1, p2)][c] <= x[p2][c]
+            prob += s[(p1, p2)][c] >= x[p1][c] + x[p2][c] - 1
 
     # Hard constraints for required partners:
     # If a player plays, they must be with a required partner,
@@ -361,30 +358,20 @@ def generate_one_round(
 
     for c in range(num_courts):
         for p in available_players:
-            # Robust Big-M constraints for ratings
-            # If x=1: max >= rating. If x=0: max >= rating - OPTIMIZER_BIG_M (trivially true)
-            prob += max_rating_on_court[c] >= player_ratings[p] - OPTIMIZER_BIG_M * (
+            # Skill balance constraints use TIER RATINGS for court grouping (social hierarchy)
+            # If x=1: max >= tier. If x=0: max >= tier - BIG_M (trivially true)
+            prob += max_rating_on_court[c] >= tier_ratings[p] - OPTIMIZER_BIG_M * (
                 1 - x[p][c]
             )
-            # If x=1: min <= rating. If x=0: min <= rating + OPTIMIZER_BIG_M (trivially true)
-            prob += min_rating_on_court[c] <= player_ratings[p] + OPTIMIZER_BIG_M * (
+            # If x=1: min <= tier. If x=0: min <= tier + BIG_M (trivially true)
+            prob += min_rating_on_court[c] <= tier_ratings[p] + OPTIMIZER_BIG_M * (
                 1 - x[p][c]
             )
 
         for p1, p2 in player_pairs:
-            pair_power = player_ratings[p1] + player_ratings[p2]
-            # Apply penalty if both players are female
-            if (
-                player_genders[p1] == Gender.FEMALE
-                and player_genders[p2] == Gender.FEMALE
-            ):
-                pair_power += female_female_team_penalty
-            # Apply penalty if pair is mixed (one male, one female)
-            elif {player_genders[p1], player_genders[p2]} == {
-                Gender.MALE,
-                Gender.FEMALE,
-            }:
-                pair_power += mixed_gender_team_penalty
+            # Team power uses REAL SKILLS for fairness (win probability)
+            # Averaged so power imbalance is on same 0-5 scale as skill spread
+            pair_power = (real_skills[p1] + real_skills[p2]) / 2
 
             # Robust Big-M constraints for team power
             prob += max_team_power[c] >= pair_power - OPTIMIZER_BIG_M * (
@@ -406,7 +393,7 @@ def generate_one_round(
             "No optimal solution found for doubles. Status: %s",
             pulp.LpStatus[prob.status],
         )
-        return OptimizerResult(matches=None, partner_history=historical_partners)
+        return OptimizerResult(matches=None, court_history=court_history)
 
     # Log debug info
     log_optimizer_debug(
@@ -415,7 +402,7 @@ def generate_one_round(
         max_rating_on_court=max_rating_on_court,
         min_rating_on_court=min_rating_on_court,
         total_skill_objective=pulp.value(total_skill_objective),
-        total_pairing_objective=pulp.value(total_pairing_objective),
+        total_court_history_objective=pulp.value(total_court_history_objective),
         objective_value=pulp.value(prob.objective),
         max_team_power=max_team_power,
         min_team_power=min_team_power,
@@ -423,9 +410,16 @@ def generate_one_round(
     )
 
     matches = []
-    updated_historical_partners = historical_partners.copy()
+    updated_court_history = court_history.copy()
     for c in range(num_courts):
         court_players = [p for p in available_players if x[p][c].value() > 0.5]
+
+        # Update court history for ALL pairs that shared this court (6 pairs for doubles)
+        for p1, p2 in combinations(sorted(court_players), 2):
+            pair_key = tuple(sorted((p1, p2)))
+            updated_court_history[pair_key] = (
+                updated_court_history.get(pair_key, 0) + 1
+            )
 
         partnerships = []
         for p1, p2 in combinations(court_players, 2):
@@ -434,12 +428,6 @@ def generate_one_round(
                 partnerships.append(pair_key)
 
         if len(partnerships) == players_per_court / 2:
-            for p1, p2 in partnerships:
-                pair_key = tuple(sorted((p1, p2)))
-                updated_historical_partners[pair_key] = (
-                    updated_historical_partners.get(pair_key, 0) + 1
-                )
-
             team1 = partnerships[0]
             team2 = partnerships[1]
 
@@ -451,4 +439,4 @@ def generate_one_round(
                 )
             )
 
-    return OptimizerResult(matches=matches, partner_history=updated_historical_partners)
+    return OptimizerResult(matches=matches, court_history=updated_court_history)

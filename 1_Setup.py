@@ -120,9 +120,6 @@ def start_session(
     player_table: dict[str, Player],
     num_courts: int,
     weights: dict[str, Any],
-    female_female_team_penalty: float,
-    mixed_gender_team_penalty: float,
-    female_singles_penalty: float,
     session_name: str,
     is_doubles: bool,
     is_recorded: bool = True,
@@ -137,9 +134,6 @@ def start_session(
             player_table=player_table,
             num_courts=num_courts,
             weights=weights,
-            female_female_team_penalty=female_female_team_penalty,
-            mixed_gender_team_penalty=mixed_gender_team_penalty,
-            female_singles_penalty=female_singles_penalty,
             session_name=session_name,
             is_doubles=is_doubles,
             is_recorded=is_recorded,
@@ -386,61 +380,16 @@ with st.sidebar:
         st.session_state.power_weight = st.session_state.weights["power"]
     if "pairing_weight" not in st.session_state:
         st.session_state.pairing_weight = st.session_state.weights["pairing"]
-    if "female_female_team_penalty" not in st.session_state:
-        st.session_state.female_female_team_penalty = st.session_state.weights[
-            "female_female_team_penalty"
-        ]
-    if "mixed_gender_team_penalty" not in st.session_state:
-        st.session_state.mixed_gender_team_penalty = st.session_state.weights[
-            "mixed_gender_team_penalty"
-        ]
-    if "female_singles_penalty" not in st.session_state:
-        st.session_state.female_singles_penalty = st.session_state.weights[
-            "female_singles_penalty"
-        ]
 
     # Let the widgets manage their own state via keys
     st.number_input("Skill Balance", min_value=0, step=1, key="skill_weight")
     st.number_input("Power Balance", min_value=0, step=1, key="power_weight")
     st.number_input("Pairing History", min_value=0, step=1, key="pairing_weight")
-    st.number_input(
-        "FF Team Penalty",
-        min_value=-10,
-        max_value=0,
-        step=1,
-        key="female_female_team_penalty",
-        help="Penalty for female-female teams (doubles)",
-    )
-    st.number_input(
-        "MF Team Penalty",
-        min_value=-10,
-        max_value=0,
-        step=1,
-        key="mixed_gender_team_penalty",
-        help="Penalty for mixed-gender teams (doubles)",
-    )
-    st.number_input(
-        "Female Singles Penalty",
-        min_value=-10,
-        max_value=0,
-        step=1,
-        key="female_singles_penalty",
-        help="Penalty for female players in singles mode",
-    )
 
     # Update the central weights dictionary from the widget states
     st.session_state.weights["skill"] = st.session_state.skill_weight
     st.session_state.weights["power"] = st.session_state.power_weight
     st.session_state.weights["pairing"] = st.session_state.pairing_weight
-    st.session_state.weights["female_female_team_penalty"] = (
-        st.session_state.female_female_team_penalty
-    )
-    st.session_state.weights["mixed_gender_team_penalty"] = (
-        st.session_state.mixed_gender_team_penalty
-    )
-    st.session_state.weights["female_singles_penalty"] = (
-        st.session_state.female_singles_penalty
-    )
 
 # Initialize persistent game mode (is_doubles boolean)
 if "is_doubles_persistent" not in st.session_state:
@@ -533,9 +482,6 @@ if st.button("🚀 Start New Session", type="primary"):
             player_table,
             num_courts,
             st.session_state.weights,
-            st.session_state.weights["female_female_team_penalty"],
-            st.session_state.weights["mixed_gender_team_penalty"],
-            st.session_state.weights["female_singles_penalty"],
             final_session_name,
             is_doubles,
             is_recorded,

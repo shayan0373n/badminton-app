@@ -12,7 +12,9 @@ def test_hub_scenario_feasibility():
     # 4 Players available for 1 court (doubles)
     # P1 is the Hub. P2 and P3 are spokes. P4 is a stranger.
     players = ["P1", "P2", "P3", "P4"]
-    ratings = {p: 3.0 for p in players}
+    # For tests with uniform ratings, tier_ratings == real_skills
+    tier_ratings = {p: 2.5 for p in players}
+    real_skills = {p: 2.5 for p in players}
     genders = {p: Gender.MALE for p in players}
 
     # Hub constraints
@@ -20,11 +22,12 @@ def test_hub_scenario_feasibility():
 
     # Force 1 court, 0 resting
     result = generate_one_round(
-        player_ratings=ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=genders,
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         required_partners=required_partners,
         is_doubles=True,
     )
@@ -64,7 +67,8 @@ def test_hub_forced_rest_feasibility():
     """
     # 5 Players. P1 is rest. P2, P3, P4, P5 should play.
     active_players = ["P2", "P3", "P4", "P5"]
-    ratings = {p: 3.0 for p in active_players}
+    tier_ratings = {p: 2.5 for p in active_players}
+    real_skills = {p: 2.5 for p in active_players}
     genders = {p: Gender.MALE for p in active_players}
 
     # P1 is technically in the requirement definitions, but is in the rest set
@@ -75,11 +79,12 @@ def test_hub_forced_rest_feasibility():
     }
 
     result = generate_one_round(
-        player_ratings=ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=genders,
         players_to_rest={"P1"},  # P1 is forced to rest
         num_courts=1,
-        historical_partners={},
+        court_history={},
         required_partners=required_partners,
         is_doubles=True,
     )
@@ -101,17 +106,19 @@ def test_triangle_scenario():
     If P2 and P3 pair up, P1 should be excused to play with P4.
     """
     players = ["P1", "P2", "P3", "P4"]  # Ends up as P2-P3 vs P1-P4 ideally
-    ratings = {p: 3.0 for p in players}
+    tier_ratings = {p: 2.5 for p in players}
+    real_skills = {p: 2.5 for p in players}
     genders = {p: Gender.MALE for p in players}
 
     required_partners = {"P1": {"P2", "P3"}, "P2": {"P1", "P3"}, "P3": {"P1", "P2"}}
 
     result = generate_one_round(
-        player_ratings=ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=genders,
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         required_partners=required_partners,
         is_doubles=True,
     )

@@ -11,6 +11,7 @@ import logging
 
 from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
+from rating_service import compute_gender_statistics
 from session_logic import ClubNightSession, Player, SessionManager
 from app_types import Gender
 
@@ -220,9 +221,6 @@ def create_new_session(
     player_table: dict[str, Player],
     num_courts: int,
     weights: dict,
-    female_female_team_penalty: float,
-    mixed_gender_team_penalty: float,
-    female_singles_penalty: float,
     session_name: str,
     is_doubles: bool,
     is_recorded: bool = True,
@@ -230,10 +228,11 @@ def create_new_session(
     """
     Creates and initializes a new session.
 
-    1. Creates session record in Database (if recorded)
-    2. Initializes ClubNightSession object
-    3. Prepares the first round
-    4. Saves session to disk
+    1. Computes gender statistics from all registered players
+    2. Creates session record in Database (if recorded)
+    3. Initializes ClubNightSession object
+    4. Prepares the first round
+    5. Saves session to disk
 
     Returns:
         The initialized ClubNightSession object.
@@ -241,28 +240,30 @@ def create_new_session(
     Raises:
         DatabaseError: If session creation in DB fails.
     """
-    # 1. Create session record in Supabase
+    # 1. Compute gender statistics from all registered players
+    all_players = PlayerDB.get_all_players()
+    gender_stats = compute_gender_statistics(all_players)
+
+    # 2. Create session record in Supabase
     database_id = None
     if is_recorded:
         database_id = SessionDB.create_session(session_name, is_doubles)
 
-    # 2. Initialize Session Object
+    # 3. Initialize Session Object
     session = ClubNightSession(
         players=player_table,
         num_courts=num_courts,
+        gender_stats=gender_stats,
         database_id=database_id,
         weights=weights,
-        female_female_team_penalty=female_female_team_penalty,
-        mixed_gender_team_penalty=mixed_gender_team_penalty,
-        female_singles_penalty=female_singles_penalty,
         is_doubles=is_doubles,
         is_recorded=is_recorded,
     )
 
-    # 3. Prepare First Round
+    # 4. Prepare First Round
     session.prepare_round()
 
-    # 4. Save to Disk
+    # 5. Save to Disk
     SessionManager.save(session, session_name)
 
     return session

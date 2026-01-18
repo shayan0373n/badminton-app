@@ -35,11 +35,20 @@ PlayerPair = tuple[PlayerName, PlayerName]
 # Mapping of player names to their normalized ratings (0-5 scale)
 PlayerRatings = dict[PlayerName, float]
 
+# Mapping of player names to their tier ratings (Z-score normalized, 0-5 scale)
+TierRatings = dict[PlayerName, float]
+
+# Mapping of player names to their real skill (direct normalized, 0-5 scale)
+RealSkills = dict[PlayerName, float]
+
 # Mapping of player names to their gender ('M' or 'F')
 PlayerGenders = dict[PlayerName, Gender]
 
-# History of how often player pairs have been partnered together
-PartnerHistory = dict[PlayerPair, int]
+# Gender statistics: maps Gender -> (mean_mu, std_mu, player_count)
+GenderStats = dict[Gender, tuple[float, float, int]]
+
+# History of how often player pairs have shared a court together
+CourtHistory = dict[PlayerPair, int]
 
 # Graph of required partner relationships (player -> set of players they must partner with)
 RequiredPartners = dict[PlayerName, set[PlayerName]]
@@ -98,12 +107,12 @@ class OptimizerResult:
 
     Attributes:
         matches: List of match assignments, or None if optimization failed
-        partner_history: Updated partner history after this round
+        court_history: Updated court history after this round
         success: Whether the optimization succeeded
     """
 
     matches: MatchList | None
-    partner_history: PartnerHistory
+    court_history: CourtHistory
     success: bool = field(init=False)
 
     def __post_init__(self) -> None:

@@ -32,18 +32,6 @@ OPTIMIZER_SKILL_RANGE = OPTIMIZER_RANK_MAX - OPTIMIZER_RANK_MIN
 OPTIMIZER_BIG_M = 1000.0
 
 # =============================================================================
-# Gender Penalty Constants (relative to optimizer's 0-5 scale)
-#
-# These penalties adjust the effective "power" of teams/players for balancing:
-# - PENALTY_FEMALE_FEMALE_TEAM: Applied to doubles teams with two female players
-# - PENALTY_MIXED_GENDER_TEAM: Applied to doubles teams with one male + one female
-# - PENALTY_FEMALE_SINGLES: Applied to female players in singles matches
-# =============================================================================
-DEFAULT_PENALTY_FEMALE_FEMALE_TEAM = -5.0
-DEFAULT_PENALTY_MIXED_GENDER_TEAM = -3.0
-DEFAULT_PENALTY_FEMALE_SINGLES = -2.0
-
-# =============================================================================
 # Session Setup Constants
 # =============================================================================
 DEFAULT_NUM_COURTS = 2
@@ -53,9 +41,6 @@ DEFAULT_WEIGHTS = {
     "skill": 1,
     "power": 3,
     "pairing": 2,
-    "female_female_team_penalty": DEFAULT_PENALTY_FEMALE_FEMALE_TEAM,
-    "mixed_gender_team_penalty": DEFAULT_PENALTY_MIXED_GENDER_TEAM,
-    "female_singles_penalty": DEFAULT_PENALTY_FEMALE_SINGLES,
 }
 
 # =============================================================================
@@ -77,6 +62,16 @@ TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
 # Game dynamics
 TTT_BETA = 4.0  # Performance variance (higher = more randomness)
 TTT_GAMMA = 10.0  # Skill drift per day (~0.5 sigma growth per 30 inactive days)
+
+# =============================================================================
+# Gender Statistics Fallback Constants
+#
+# Used when computing Z-scores for tier ratings when a gender has too few
+# players or zero standard deviation.
+# =============================================================================
+FALLBACK_GENDER_MEAN = TTT_MU_AVERAGE  # 25.0
+FALLBACK_GENDER_STD = 4.0
+MIN_PLAYERS_FOR_GENDER_STATS = 3
 
 # =============================================================================
 # Time & Timestamp Constants

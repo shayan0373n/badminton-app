@@ -1,10 +1,13 @@
 import pytest
 from session_logic import ClubNightSession, Player
+from rating_service import compute_gender_statistics
 from app_types import Gender, SinglesMatch, DoublesMatch
 
 
-def test_session_initialization(sample_players):
-    session = ClubNightSession(players=sample_players, num_courts=2, is_doubles=True)
+def test_session_initialization(sample_players, sample_gender_stats):
+    session = ClubNightSession(
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     assert len(session.player_pool) == 8
     assert session.num_courts == 2
@@ -12,8 +15,8 @@ def test_session_initialization(sample_players):
     assert len(session.player_pool) == 8
 
 
-def test_add_remove_player(sample_players):
-    session = ClubNightSession(players=sample_players, num_courts=2)
+def test_add_remove_player(sample_players, sample_gender_stats):
+    session = ClubNightSession(players=sample_players, num_courts=2, gender_stats=sample_gender_stats)
 
     # Remove a player
     session.remove_player("Alice")
@@ -24,10 +27,11 @@ def test_add_remove_player(sample_players):
     assert "Zoe" in session.player_pool
 
 
-def test_prepare_round(sample_players):
+def test_prepare_round(sample_players, sample_gender_stats):
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,  # Only 1 court, 4 players will play, 4 will rest
+        gender_stats=sample_gender_stats,
         is_doubles=True,
     )
 
@@ -38,8 +42,10 @@ def test_prepare_round(sample_players):
     assert len(session.resting_players) == 4
 
 
-def test_finalize_round(sample_players):
-    session = ClubNightSession(players=sample_players, num_courts=1, is_doubles=True)
+def test_finalize_round(sample_players, sample_gender_stats):
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     session.prepare_round()
     match = session.current_round_matches[0]
@@ -61,9 +67,11 @@ def test_finalize_round(sample_players):
 # =============================================================================
 
 
-def test_add_player_mid_session(sample_players):
+def test_add_player_mid_session(sample_players, sample_gender_stats):
     """Adding player mid-session should give them average earned rating."""
-    session = ClubNightSession(players=sample_players, num_courts=1, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     # Play a round to accumulate some ratings
     session.prepare_round()
@@ -80,9 +88,11 @@ def test_add_player_mid_session(sample_players):
     assert new_player.earned_rating >= 0  # Should have some earned rating
 
 
-def test_add_duplicate_player_fails(sample_players):
+def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
     """Adding a player that already exists should fail."""
-    session = ClubNightSession(players=sample_players, num_courts=1, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     success = session.add_player(name="Alice", gender=Gender.FEMALE)
     assert success is False
@@ -96,7 +106,10 @@ def test_remove_player_while_playing():
         "P3": Player(name="P3", gender=Gender.FEMALE, prior_mu=25.0),
         "P4": Player(name="P4", gender=Gender.FEMALE, prior_mu=25.0),
     }
-    session = ClubNightSession(players=players, num_courts=1, is_doubles=True)
+    gender_stats = compute_gender_statistics(players)
+    session = ClubNightSession(
+        players=players, num_courts=1, gender_stats=gender_stats, is_doubles=True
+    )
 
     session.prepare_round()
 
@@ -121,7 +134,10 @@ def test_remove_resting_player():
         f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=25.0)
         for i in range(1, 6)
     }
-    session = ClubNightSession(players=players, num_courts=1, is_doubles=True)
+    gender_stats = compute_gender_statistics(players)
+    session = ClubNightSession(
+        players=players, num_courts=1, gender_stats=gender_stats, is_doubles=True
+    )
 
     session.prepare_round()
 
@@ -139,9 +155,11 @@ def test_remove_resting_player():
 # =============================================================================
 
 
-def test_update_courts_mid_session(sample_players):
+def test_update_courts_mid_session(sample_players, sample_gender_stats):
     """Changing court count should affect next round."""
-    session = ClubNightSession(players=sample_players, num_courts=2, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     # First round with 2 courts
     session.prepare_round()
@@ -161,9 +179,11 @@ def test_update_courts_mid_session(sample_players):
     assert len(session.current_round_matches) == 1
 
 
-def test_update_courts_to_zero_fails(sample_players):
+def test_update_courts_to_zero_fails(sample_players, sample_gender_stats):
     """Setting courts to 0 should raise error."""
-    session = ClubNightSession(players=sample_players, num_courts=2, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     with pytest.raises(Exception):  # SessionError
         session.update_courts(0)
@@ -174,9 +194,11 @@ def test_update_courts_to_zero_fails(sample_players):
 # =============================================================================
 
 
-def test_multiple_rounds_all_succeed(sample_players):
+def test_multiple_rounds_all_succeed(sample_players, sample_gender_stats):
     """Multiple consecutive rounds should all succeed."""
-    session = ClubNightSession(players=sample_players, num_courts=2, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     for round_num in range(5):
         session.prepare_round()
@@ -190,9 +212,11 @@ def test_multiple_rounds_all_succeed(sample_players):
         session.finalize_round(winners)
 
 
-def test_resting_players_rotate_fairly(sample_players):
+def test_resting_players_rotate_fairly(sample_players, sample_gender_stats):
     """Over multiple rounds, all players should get similar rest time."""
-    session = ClubNightSession(players=sample_players, num_courts=1, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     rest_counts = {name: 0 for name in sample_players}
 
@@ -220,7 +244,10 @@ def test_session_singles_mode():
         f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=25.0)
         for i in range(1, 5)
     }
-    session = ClubNightSession(players=players, num_courts=2, is_doubles=False)
+    gender_stats = compute_gender_statistics(players)
+    session = ClubNightSession(
+        players=players, num_courts=2, gender_stats=gender_stats, is_doubles=False
+    )
 
     assert session.players_per_court == 2
 
@@ -238,9 +265,11 @@ def test_session_singles_mode():
 # =============================================================================
 
 
-def test_get_standings_sorted(sample_players):
+def test_get_standings_sorted(sample_players, sample_gender_stats):
     """Standings should be sorted by earned rating descending."""
-    session = ClubNightSession(players=sample_players, num_courts=1, is_doubles=True)
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, is_doubles=True
+    )
 
     # Play a round
     session.prepare_round()

@@ -347,11 +347,6 @@ def handle_session_termination(session: ClubNightSession, session_name: str) -> 
     st.session_state.skill_weight = persistent["weights"]["skill"]
     st.session_state.power_weight = persistent["weights"]["power"]
     st.session_state.pairing_weight = persistent["weights"]["pairing"]
-    st.session_state.female_female_team_penalty = persistent[
-        "female_female_team_penalty"
-    ]
-    st.session_state.mixed_gender_team_penalty = persistent["mixed_gender_team_penalty"]
-    st.session_state.female_singles_penalty = persistent["female_singles_penalty"]
     st.session_state.is_recorded_persistent = persistent["is_recorded"]
 
     # Clean up

@@ -1,21 +1,30 @@
 import pytest
 from optimizer import generate_one_round
 from app_types import Gender, SinglesMatch, DoublesMatch
+from session_logic import Player
 from tests.utils import generate_random_players, run_optimizer_rounds
+
+
+def _make_ratings(players):
+    """Helper to create tier_ratings and real_skills from player list."""
+    # For tests, we use the same values for both (normalized prior_mu)
+    ratings = {p.name: p.prior_mu for p in players}
+    return ratings, ratings  # tier_ratings, real_skills
 
 
 def test_more_player_than_courts_with_no_rest():
     players = generate_random_players(5)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
     num_courts = 1
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=num_courts,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
     assert result.success is True
@@ -23,15 +32,20 @@ def test_more_player_than_courts_with_no_rest():
     assert len(matches) == 1
 
 
-def test_generate_one_round_doubles(player_ratings, player_genders):
+def test_generate_one_round_doubles(sample_players, sample_gender_stats):
+    from rating_service import prepare_optimizer_ratings
+
+    tier_ratings, real_skills = prepare_optimizer_ratings(sample_players, sample_gender_stats)
+    player_genders = {name: p.gender for name, p in sample_players.items()}
     num_courts = 2
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=num_courts,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -47,16 +61,21 @@ def test_generate_one_round_doubles(player_ratings, player_genders):
         assert len(set(all_players)) == 4
 
 
-def test_generate_one_round_singles(player_ratings, player_genders):
-    available_players = list(player_ratings.keys())[:4]
+def test_generate_one_round_singles(sample_players, sample_gender_stats):
+    from rating_service import prepare_optimizer_ratings
+
+    tier_ratings, real_skills = prepare_optimizer_ratings(sample_players, sample_gender_stats)
+    player_genders = {name: p.gender for name, p in sample_players.items()}
+    available_players = list(tier_ratings.keys())[:4]
     num_courts = 2
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
-        players_to_rest=set(list(player_ratings.keys())[4:]),
+        players_to_rest=set(list(tier_ratings.keys())[4:]),
         num_courts=num_courts,
-        historical_partners={},
+        court_history={},
         players_per_court=2,
         is_doubles=False,
     )
@@ -71,17 +90,22 @@ def test_generate_one_round_singles(player_ratings, player_genders):
         assert match.player_1 != match.player_2
 
 
-def test_optimizer_insufficient_players(player_ratings, player_genders):
+def test_optimizer_insufficient_players(sample_players, sample_gender_stats):
+    from rating_service import prepare_optimizer_ratings
+
+    tier_ratings, real_skills = prepare_optimizer_ratings(sample_players, sample_gender_stats)
+    player_genders = {name: p.gender for name, p in sample_players.items()}
     # Only 3 players for doubles (requires 4)
     available_players = ["Alice", "Bob", "Charlie"]
     num_courts = 1
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
-        players_to_rest=set(list(player_ratings.keys())) - set(available_players),
+        players_to_rest=set(list(tier_ratings.keys())) - set(available_players),
         num_courts=num_courts,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -97,8 +121,7 @@ def test_locked_pair_multi_round():
     Graph: P1 -- P2
     """
     players = generate_random_players(8)
-    player_ratings = {p.name: p.prior_mu for p in players}
-    player_genders = {p.name: p.gender for p in players}
+    players_dict = {p.name: p for p in players}
 
     # P1 and P2 are a locked pair
     required_partners = {
@@ -107,8 +130,7 @@ def test_locked_pair_multi_round():
     }
 
     for round_num, result in run_optimizer_rounds(
-        player_ratings,
-        player_genders,
+        players_dict,
         num_courts=2,
         required_partners=required_partners,
         num_rounds=10,
@@ -133,8 +155,7 @@ def test_square_graph_constraint():
            P3 -- P4
     """
     players = generate_random_players(8)
-    player_ratings = {p.name: p.prior_mu for p in players}
-    player_genders = {p.name: p.gender for p in players}
+    players_dict = {p.name: p for p in players}
 
     required_partners = {
         "P1": {"P2", "P3"},
@@ -145,8 +166,7 @@ def test_square_graph_constraint():
     group = {"P1", "P2", "P3", "P4"}
 
     for round_num, result in run_optimizer_rounds(
-        player_ratings,
-        player_genders,
+        players_dict,
         num_courts=2,
         required_partners=required_partners,
         num_rounds=10,
@@ -175,15 +195,16 @@ def test_square_graph_constraint():
 def test_singles_exact_players_for_one_court():
     """Exactly 2 players for 1 singles court - no one rests."""
     players = generate_random_players(2)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         players_per_court=2,
         is_doubles=False,
     )
@@ -198,15 +219,16 @@ def test_singles_exact_players_for_one_court():
 def test_singles_multiple_courts():
     """4 players for 2 singles courts."""
     players = generate_random_players(4)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=2,
-        historical_partners={},
+        court_history={},
         players_per_court=2,
         is_doubles=False,
     )
@@ -225,15 +247,16 @@ def test_singles_multiple_courts():
 def test_singles_insufficient_players():
     """Only 1 player for singles - returns empty matches."""
     players = generate_random_players(1)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         players_per_court=2,
         is_doubles=False,
     )
@@ -251,15 +274,16 @@ def test_singles_insufficient_players():
 def test_doubles_exact_players_for_one_court():
     """Exactly 4 players for 1 doubles court - no one rests."""
     players = generate_random_players(4)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -273,15 +297,16 @@ def test_doubles_exact_players_for_one_court():
 def test_doubles_exact_players_for_two_courts():
     """Exactly 8 players for 2 doubles courts - no one rests."""
     players = generate_random_players(8)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=2,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -302,16 +327,17 @@ def test_doubles_more_courts_than_players_allow():
     The optimizer automatically reduces court count to what's possible.
     """
     players = generate_random_players(5)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     # Rest 1 player to have exactly 4 available, request 3 courts
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest={"P5"},
         num_courts=3,  # Request 3 but only 4 players = 1 court possible
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -328,15 +354,16 @@ def test_doubles_more_courts_than_players_allow():
 def test_all_players_resting():
     """All players resting - returns empty matches (no one to play)."""
     players = generate_random_players(4)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest={"P1", "P2", "P3", "P4"},  # Everyone resting
         num_courts=1,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -348,15 +375,16 @@ def test_all_players_resting():
 def test_zero_courts():
     """Zero courts requested - returns empty matches (valid edge case)."""
     players = generate_random_players(4)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=0,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -368,11 +396,12 @@ def test_zero_courts():
 def test_empty_player_pool():
     """No players at all - returns empty matches."""
     result = generate_one_round(
-        player_ratings={},
+        tier_ratings={},
+        real_skills={},
         player_genders={},
         players_to_rest=set(),
         num_courts=1,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 
@@ -384,15 +413,16 @@ def test_empty_player_pool():
 def test_no_duplicate_players_across_matches():
     """Players should only appear in one match per round."""
     players = generate_random_players(12)
-    player_ratings = {p.name: p.prior_mu for p in players}
+    tier_ratings, real_skills = _make_ratings(players)
     player_genders = {p.name: p.gender for p in players}
 
     result = generate_one_round(
-        player_ratings=player_ratings,
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
         player_genders=player_genders,
         players_to_rest=set(),
         num_courts=3,
-        historical_partners={},
+        court_history={},
         is_doubles=True,
     )
 

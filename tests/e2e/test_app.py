@@ -14,12 +14,12 @@ def test_setup_page_smoke():
     assert "Badminton" in at.title[0].value
 
 
-def test_session_page_smoke(sample_players):
+def test_session_page_smoke(sample_players, sample_gender_stats):
     """Basic smoke test for the Session page."""
     at = AppTest.from_file(os.path.abspath("pages/2_Session.py"))
 
     at.session_state.session = ClubNightSession(
-        players=sample_players, num_courts=2, is_doubles=True
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
     )
     at.session_state.current_session_name = "Test Session"
 

@@ -18,13 +18,10 @@ from session_logic import Player
 logger = logging.getLogger("app.player_service")
 
 
-def create_editor_dataframe(
-    player_table: dict[str, Player], is_doubles: bool = DEFAULT_IS_DOUBLES
-) -> pd.DataFrame:
-    """Creates a DataFrame for the editor from player_table."""
-    player_ranks = range(1, len(player_table) + 1)
-    df_data = {
-        "#": player_ranks,
+def _get_base_player_data(player_table: dict[str, Player]) -> dict:
+    """Internal helper to extract common player data for DataFrames."""
+    return {
+        "#": range(1, len(player_table) + 1),
         "Player Name": [p.name for p in player_table.values()],
         "Gender": [p.gender for p in player_table.values()],
         "Prior Mu": [p.prior_mu for p in player_table.values()],
@@ -33,7 +30,21 @@ def create_editor_dataframe(
         "Rating": [p.conservative_rating for p in player_table.values()],
         "database_id": [p.database_id for p in player_table.values()],
     }
-    # Only add Team Name column for Doubles mode
+
+
+def create_registry_dataframe(player_table: dict[str, Player]) -> pd.DataFrame:
+    """Creates a DataFrame for the master member registry."""
+    return pd.DataFrame(_get_base_player_data(player_table))
+
+
+def create_session_setup_dataframe(
+    player_table: dict[str, Player], is_doubles: bool = DEFAULT_IS_DOUBLES
+) -> pd.DataFrame:
+    """
+    Creates a DataFrame for session setup, potentially including team names.
+    Includes 'Team Name' column only if in doubles mode.
+    """
+    df_data = _get_base_player_data(player_table)
     if is_doubles:
         df_data["Team Name"] = [
             p.team_name if hasattr(p, "team_name") else ""

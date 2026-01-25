@@ -13,7 +13,13 @@ import random
 
 import pulp
 
-from constants import OPTIMIZER_RANK_MIN, OPTIMIZER_RANK_MAX, OPTIMIZER_BIG_M
+from constants import (
+    OPTIMIZER_RANK_MIN,
+    OPTIMIZER_RANK_MAX,
+    OPTIMIZER_BIG_M,
+    PARTNER_HISTORY_MULTIPLIER,
+    COURT_HISTORY_NORMALIZATION,
+)
 from logger import log_optimizer_debug
 from app_types import (
     MatchList,
@@ -30,6 +36,20 @@ from app_types import (
 )
 
 logger = logging.getLogger("app.optimizer")
+
+
+def get_court_history_penalty(
+    pair: PlayerPair, court_history: CourtHistory
+) -> float:
+    """Calculate weighted penalty for a player pair based on their court history.
+
+    Penalty = PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
+
+    This makes repeated partnerships more costly than repeated opponents,
+    encouraging variety in who players team up with.
+    """
+    partner_count, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
+    return PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
 
 
 # ============================================================================
@@ -91,8 +111,9 @@ def generate_singles_round(
     )
 
     # Court history objective (minimize sharing court with same players)
+    # In singles, all pairs are opponents (no partners)
     total_court_history_objective = pulp.lpSum(
-        o[pair][c] * court_history.get(tuple(sorted(pair)), 0)
+        o[pair][c] * get_court_history_penalty(pair, court_history)
         for pair in player_pairs
         for c in range(num_courts)
     )
@@ -165,9 +186,9 @@ def generate_singles_round(
         if len(court_players) == 2:
             p1, p2 = sorted(court_players)
             pair_key = tuple(sorted((p1, p2)))
-            updated_court_history[pair_key] = (
-                updated_court_history.get(pair_key, 0) + 1
-            )
+            # In singles, all pairs are opponents (no partners)
+            partner_count, opponent_count = updated_court_history.get(pair_key, (0, 0))
+            updated_court_history[pair_key] = (partner_count, opponent_count + 1)
 
             matches.append(
                 SinglesMatch(
@@ -222,6 +243,9 @@ def generate_one_round(
     Returns:
         OptimizerResult with matches and updated court history
     """
+    logger.debug("Tier ratings: %s", tier_ratings)
+    logger.debug("Real skills: %s", real_skills)
+
     if weights is None:
         weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
 
@@ -287,13 +311,16 @@ def generate_one_round(
         for partner in partners:
             locked_pairs_set.add(tuple(sorted((player, partner))))
     # Court history objective: penalize all pairs sharing a court (partners + opponents)
-    # Divided by 3 to normalize: 6 pairs per court / 3 = 2 (same scale as old partner history)
-    total_court_history_objective = pulp.lpSum(
-        s[pair][c] * court_history.get(tuple(sorted(pair)), 0)
-        for pair in player_pairs
-        for c in range(num_courts)
-        if tuple(sorted(pair)) not in locked_pairs_set
-    ) / 3
+    # Uses weighted penalty: PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
+    total_court_history_objective = (
+        pulp.lpSum(
+            s[pair][c] * get_court_history_penalty(pair, court_history)
+            for pair in player_pairs
+            for c in range(num_courts)
+            if tuple(sorted(pair)) not in locked_pairs_set
+        )
+        / COURT_HISTORY_NORMALIZATION
+    )
 
     prob += (
         weights["skill"] * total_skill_objective
@@ -414,20 +441,25 @@ def generate_one_round(
     for c in range(num_courts):
         court_players = [p for p in available_players if x[p][c].value() > 0.5]
 
-        # Update court history for ALL pairs that shared this court (6 pairs for doubles)
-        for p1, p2 in combinations(sorted(court_players), 2):
-            pair_key = tuple(sorted((p1, p2)))
-            updated_court_history[pair_key] = (
-                updated_court_history.get(pair_key, 0) + 1
-            )
-
-        partnerships = []
+        # Identify partner pairs (2 pairs per court in doubles)
+        partner_pairs: set[PlayerPair] = set()
         for p1, p2 in combinations(court_players, 2):
             pair_key = tuple(sorted((p1, p2)))
             if t[pair_key][c].value() > 0.5:
-                partnerships.append(pair_key)
+                partner_pairs.add(pair_key)
 
-        if len(partnerships) == players_per_court / 2:
+        # Update court history for ALL pairs that shared this court (6 pairs for doubles)
+        # Partners increment partner_count, opponents increment opponent_count
+        for p1, p2 in combinations(sorted(court_players), 2):
+            pair_key = tuple(sorted((p1, p2)))
+            partner_count, opponent_count = updated_court_history.get(pair_key, (0, 0))
+            if pair_key in partner_pairs:
+                updated_court_history[pair_key] = (partner_count + 1, opponent_count)
+            else:
+                updated_court_history[pair_key] = (partner_count, opponent_count + 1)
+
+        if len(partner_pairs) == players_per_court / 2:
+            partnerships = list(partner_pairs)
             team1 = partnerships[0]
             team2 = partnerships[1]
 

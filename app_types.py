@@ -48,7 +48,8 @@ PlayerGenders = dict[PlayerName, Gender]
 GenderStats = dict[Gender, tuple[float, float, int]]
 
 # History of how often player pairs have shared a court together
-CourtHistory = dict[PlayerPair, int]
+# Value is (partner_count, opponent_count) for debugging and weighted penalty calculation
+CourtHistory = dict[PlayerPair, tuple[int, int]]
 
 # Graph of required partner relationships (player -> set of players they must partner with)
 RequiredPartners = dict[PlayerName, set[PlayerName]]

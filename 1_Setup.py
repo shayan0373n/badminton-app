@@ -47,7 +47,11 @@ from session_logic import ClubNightSession, SessionManager, Player
 from app_types import Gender
 import session_service
 import player_service
-from player_service import create_editor_dataframe, dataframe_to_players
+from player_service import (
+    create_registry_dataframe,
+    create_session_setup_dataframe,
+    dataframe_to_players,
+)
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
@@ -217,8 +221,8 @@ with tab2:
     st.subheader("Manage Member Registry")
     st.info("This is your master database. Add new members or update ratings here.")
 
-    # Create DF for registry
-    registry_df = create_editor_dataframe(st.session_state.master_registry)
+    # Create DF for registry (clean view, core registry fields only)
+    registry_df = create_registry_dataframe(st.session_state.master_registry)
 
     # Column configuration for registry
     reg_column_config = {
@@ -351,7 +355,7 @@ if "editor_df" not in st.session_state:
     current_is_doubles = st.session_state.get(
         "is_doubles_persistent", DEFAULT_IS_DOUBLES
     )
-    st.session_state.editor_df = create_editor_dataframe(
+    st.session_state.editor_df = create_session_setup_dataframe(
         st.session_state.player_table, current_is_doubles
     )
 
@@ -405,7 +409,7 @@ is_doubles = st.toggle(
 if st.session_state.is_doubles_persistent != is_doubles:
     st.session_state.is_doubles_persistent = is_doubles
     # Refresh the editor dataframe to add/remove Team Name column
-    st.session_state.editor_df = create_editor_dataframe(
+    st.session_state.editor_df = create_session_setup_dataframe(
         st.session_state.player_table, is_doubles
     )
     st.rerun()

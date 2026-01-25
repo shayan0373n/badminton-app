@@ -38,6 +38,11 @@ logger = logging.getLogger("app.session_logic")
 SESSIONS_DIR = "sessions"
 
 
+def _default_court_history_value() -> tuple[int, int]:
+    """Default value factory for CourtHistory (must be module-level for pickling)."""
+    return (0, 0)
+
+
 class RestRotationQueue:
     """Manages fair rotation of which players rest each round.
 
@@ -242,7 +247,7 @@ class ClubNightSession:
 
         # State required for the optimizer
         # CourtHistory values are (partner_count, opponent_count)
-        self.court_history: CourtHistory = defaultdict(lambda: (0, 0))
+        self.court_history: CourtHistory = defaultdict(_default_court_history_value)
         self.weights = (
             weights
             if weights is not None

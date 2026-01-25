@@ -241,7 +241,8 @@ class ClubNightSession:
         self.round_num = 0
 
         # State required for the optimizer
-        self.court_history: CourtHistory = defaultdict(int)
+        # CourtHistory values are (partner_count, opponent_count)
+        self.court_history: CourtHistory = defaultdict(lambda: (0, 0))
         self.weights = (
             weights
             if weights is not None

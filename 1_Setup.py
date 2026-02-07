@@ -257,6 +257,9 @@ with tab2:
         "database_id": None,  # Hide from user - internal tracking only
     }
 
+    registry_df = registry_df.sort_values("Rating", ascending=False).reset_index(drop=True)
+    registry_df["#"] = range(1, len(registry_df) + 1)
+
     edited_reg_df = st.data_editor(
         registry_df,
         column_config=reg_column_config,

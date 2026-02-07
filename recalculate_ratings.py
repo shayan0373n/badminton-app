@@ -128,7 +128,7 @@ def recalculate_all_ratings() -> None:
     # 4. Build priors from database (prior_mu, prior_sigma)
     priors: dict[str, TTTPlayer] = {}
     for name, player in players.items():
-        priors[name] = TTTPlayer(Gaussian(mu=player.prior_mu, sigma=player.prior_sigma))
+        priors[name] = TTTPlayer(Gaussian(mu=player.prior_mu, sigma=player.prior_sigma), beta=TTT_BETA, gamma=TTT_GAMMA)
 
     logger.info(f"  Built priors for {len(priors)} players")
 
@@ -148,7 +148,7 @@ def recalculate_all_ratings() -> None:
         gamma=TTT_GAMMA,
     )
 
-    iterations = history.convergence()
+    iterations = history.convergence(iterations=30)
     logger.info(f"  Converged in {iterations} iterations")
 
     # 6. Extract final ratings

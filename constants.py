@@ -70,7 +70,7 @@ TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
 
 # Game dynamics
 TTT_BETA = 4.0  # Performance variance (higher = more randomness)
-TTT_GAMMA = 10.0  # Skill drift per day (~0.5 sigma growth per 30 inactive days)
+TTT_GAMMA = 0.55  # Skill drift per day (~0.5 sigma growth per 30 inactive days)
 
 # =============================================================================
 # Gender Statistics Fallback Constants

@@ -54,6 +54,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 |------|---------|
 | `session_logic.py` | Core domain logic. Contains `Player`, `SessionManager`, `RestRotationQueue`, and `ClubNightSession` classes. No DB calls. |
 | `optimizer.py` | Match optimization using PuLP/Gurobi. `generate_one_round()` for doubles, `generate_singles_round()` for singles. |
+| `optimizer_ortools.py` | Alternative optimizer using Google OR-Tools CP-SAT solver. Same public API as `optimizer.py`. Selected via `SOLVER_BACKEND` in `constants.py`. |
 | `app_types.py` | Type aliases and dataclasses (`Gender`, `OptimizerResult`, `SinglesMatch`, `DoublesMatch`, `TierRatings`, `RealSkills`, `GenderStats`, etc.). |
 | `constants.py` | All configuration constants (TrueSkill params, optimizer settings, fallback gender stats, defaults). |
 | `exceptions.py` | Domain exceptions: `DatabaseError`, `SessionError`, `OptimizerError`, `ValidationError`. |
@@ -193,6 +194,21 @@ The service layer (`*_service.py`) exists to:
   - `real_skills` (raw normalized 0-5): Used for team fairness (power balance)
 - This enables **organic gender balancing**: top females map to same tier as top males
 - Output is `OptimizerResult` with `matches`, `court_history`, `success`
+
+### Solver Backends
+The `SOLVER_BACKEND` constant in `constants.py` selects between two optimizer implementations:
+
+| Backend | Module | Solver | License |
+|---------|--------|--------|---------|
+| `"ortools"` (default) | `optimizer_ortools.py` | Google OR-Tools CP-SAT | Free, Apache 2.0 |
+| `"gurobi"` | `optimizer.py` | PuLP + Gurobi | Commercial |
+
+Both have identical public APIs and produce valid matches satisfying all constraints.
+
+**Key differences in the OR-Tools implementation:**
+- **`OnlyEnforceIf`** replaces Big-M constraints — no magic constants, no numerical instability
+- **Integer arithmetic** — float ratings (0.0–5.0) are scaled to integers (0–5000) via `RATING_SCALE = 1000`
+- **Native boolean logic** (`AddImplication`, `AddBoolOr`) for variable linking
 
 ### TrueSkill Through Time
 - Uses local `TrueSkillThroughTime.py/` library

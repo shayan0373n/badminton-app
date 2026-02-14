@@ -17,11 +17,16 @@ from constants import (
     DEFAULT_IS_DOUBLES,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
+    SOLVER_BACKEND,
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
 )
 from exceptions import SessionError
-from optimizer import generate_one_round
+
+if SOLVER_BACKEND == "ortools":
+    from optimizer_ortools import generate_one_round
+else:
+    from optimizer import generate_one_round
 from rating_service import prepare_optimizer_ratings
 from app_types import (
     Gender,

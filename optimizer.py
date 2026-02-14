@@ -19,6 +19,7 @@ from constants import (
     OPTIMIZER_BIG_M,
     PARTNER_HISTORY_MULTIPLIER,
     COURT_HISTORY_NORMALIZATION,
+    OPTIMIZER_TIME_LIMIT,
 )
 from logger import log_optimizer_debug
 from app_types import (
@@ -38,18 +39,22 @@ from app_types import (
 logger = logging.getLogger("app.optimizer")
 
 
-def get_court_history_penalty(
+def get_partnership_penalty(
     pair: PlayerPair, court_history: CourtHistory
 ) -> float:
-    """Calculate weighted penalty for a player pair based on their court history.
+    """Calculate the penalty for a pair being partners (teammates).
+    Only considers previous times they were partners."""
+    partner_count, _ = court_history.get(tuple(sorted(pair)), (0, 0))
+    return float(partner_count * PARTNER_HISTORY_MULTIPLIER)
 
-    Penalty = PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
 
-    This makes repeated partnerships more costly than repeated opponents,
-    encouraging variety in who players team up with.
-    """
-    partner_count, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
-    return PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
+def get_opponent_penalty(
+    pair: PlayerPair, court_history: CourtHistory
+) -> float:
+    """Calculate the penalty for a pair being opponents.
+    Only considers previous times they were opponents."""
+    _, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
+    return float(opponent_count)
 
 
 # ============================================================================
@@ -61,6 +66,7 @@ def generate_singles_round(
     real_skills: RealSkills,
     court_history: CourtHistory,
     weights: dict[str, float] | None = None,
+    time_limit: float = OPTIMIZER_TIME_LIMIT,
 ) -> OptimizerResult:
     """
     Generates a singles round with 1v1 matches.
@@ -81,7 +87,7 @@ def generate_singles_round(
         OptimizerResult with matches and updated court history
     """
     if weights is None:
-        weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
+        weights = {"skill": 1, "power": 1, "pairing": 1}
 
     # Auto-reduce courts if not enough players
     max_courts = len(available_players) // 2
@@ -113,7 +119,7 @@ def generate_singles_round(
     # Court history objective (minimize sharing court with same players)
     # In singles, all pairs are opponents (no partners)
     total_court_history_objective = pulp.lpSum(
-        o[pair][c] * get_court_history_penalty(pair, court_history)
+        o[pair][c] * get_opponent_penalty(pair, court_history)
         for pair in player_pairs
         for c in range(num_courts)
     )
@@ -155,7 +161,7 @@ def generate_singles_round(
             )
 
     # Solve
-    solver = pulp.GUROBI(msg=False, timeLimit=10)
+    solver = pulp.GUROBI(msg=False, timeLimit=time_limit)
     prob.solve(solver)
 
     if prob.status == pulp.LpStatusInfeasible:
@@ -215,6 +221,7 @@ def generate_one_round(
     weights: dict[str, float] | None = None,
     is_doubles: bool = True,
     required_partners: RequiredPartners | None = None,
+    time_limit: float = OPTIMIZER_TIME_LIMIT,
 ) -> OptimizerResult:
     """
     Generates a single, optimized round of badminton matches.
@@ -247,7 +254,7 @@ def generate_one_round(
     logger.debug("Real skills: %s", real_skills)
 
     if weights is None:
-        weights = {"skill": 1.0, "power": 1.0, "pairing": 1.0}
+        weights = {"skill": 1, "power": 1, "pairing": 1}
 
     if required_partners is None:
         required_partners = {}
@@ -275,6 +282,7 @@ def generate_one_round(
             real_skills,
             court_history,
             weights,
+            time_limit=time_limit,
         )
 
     prob = pulp.LpProblem("Badminton_Full_Optimizer", pulp.LpMinimize)
@@ -305,19 +313,13 @@ def generate_one_round(
         max_team_power[c] - min_team_power[c] for c in range(num_courts)
     )
 
-    # Exclude required partner pairs from court history penalty (they're forced anyway)
-    locked_pairs_set: set[tuple[str, str]] = set()
-    for player, partners in required_partners.items():
-        for partner in partners:
-            locked_pairs_set.add(tuple(sorted((player, partner))))
-    # Court history objective: penalize all pairs sharing a court (partners + opponents)
-    # Uses weighted penalty: PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
+    # Court history objective: penalize repeating partnerships (t) and opponents (s-t)
     total_court_history_objective = (
         pulp.lpSum(
-            s[pair][c] * get_court_history_penalty(pair, court_history)
+            t[pair][c] * get_partnership_penalty(pair, court_history)
+            + (s[pair][c] - t[pair][c]) * get_opponent_penalty(pair, court_history)
             for pair in player_pairs
             for c in range(num_courts)
-            if tuple(sorted(pair)) not in locked_pairs_set
         )
         / COURT_HISTORY_NORMALIZATION
     )
@@ -408,10 +410,10 @@ def generate_one_round(
                 1 - t[(p1, p2)][c]
             )
 
-    # Use the Gurobi solver with a 10s time limit.
+    # Use the Gurobi solver with the specified time limit.
     solver = pulp.GUROBI(
         msg=False,
-        timeLimit=10,
+        timeLimit=time_limit,
     )
     prob.solve(solver)
 

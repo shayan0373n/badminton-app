@@ -63,7 +63,9 @@ DEFAULT_WEIGHTS = {
 }
 
 # Default time limit for the optimizer in seconds
-OPTIMIZER_TIME_LIMIT = 10.0
+OPTIMIZER_TIME_LIMIT_FAST = 10.0
+OPTIMIZER_TIME_LIMIT_SLOW = 30.0
+OPTIMIZER_TIME_LIMIT = OPTIMIZER_TIME_LIMIT_FAST
 
 # =============================================================================
 # TrueSkill Through Time Rating System Constants

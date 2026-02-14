@@ -31,16 +31,16 @@ def record_matches_to_database(
     Raises:
         DatabaseError: If match recording fails
     """
-    if not session.current_round_matches or session.database_id is None:
+    if not session.current_state.matches or session.database_id is None:
         return
 
-    for match in session.current_round_matches:
+    for match in session.current_state.matches:
         court_num = match.court
         winner = winners_by_court.get(court_num)
         if not winner:
             continue
 
-        if session.is_doubles:
+        if session.config.is_doubles:
             team_1, team_2 = match.team_1, match.team_2
             winner_side = 1 if set(winner) == set(team_1) else 2
             MatchDB.add_match(
@@ -202,11 +202,11 @@ def update_weights(
         power: Weight for team power balance objective
         pairing: Weight for court history/pairing variety objective
     """
-    session.weights = {
+    session.update_weights({
         "skill": skill,
         "power": power,
         "pairing": pairing,
-    }
+    })
     SessionManager.save(session, session_name)
 
 

@@ -10,8 +10,8 @@ def test_session_initialization(sample_players, sample_gender_stats):
     )
 
     assert len(session.player_pool) == 8
-    assert session.num_courts == 2
-    assert session.is_doubles is True
+    assert session.config.num_courts == 2
+    assert session.config.is_doubles is True
     assert len(session.player_pool) == 8
 
 
@@ -36,10 +36,10 @@ def test_prepare_round(sample_players, sample_gender_stats):
     )
 
     session.prepare_round()
-    matches = session.current_round_matches
+    matches = session.current_state.matches
 
     assert len(matches) == 1
-    assert len(session.resting_players) == 4
+    assert len(session.current_state.resting_players) == 4
 
 
 def test_finalize_round(sample_players, sample_gender_stats):
@@ -48,7 +48,7 @@ def test_finalize_round(sample_players, sample_gender_stats):
     )
 
     session.prepare_round()
-    match = session.current_round_matches[0]
+    match = session.current_state.matches[0]
 
     # Mock winners
     winners_by_court = {1: match.team_1}
@@ -75,7 +75,7 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
 
     # Play a round to accumulate some ratings
     session.prepare_round()
-    match = session.current_round_matches[0]
+    match = session.current_state.matches[0]
     session.finalize_round({1: match.team_1})
 
     # Add new player
@@ -114,7 +114,7 @@ def test_remove_player_while_playing():
     session.prepare_round()
 
     # Find a player who is playing
-    match = session.current_round_matches[0]
+    match = session.current_state.matches[0]
     playing_player = match.team_1[0]
 
     # Remove should queue, not immediately remove
@@ -142,7 +142,7 @@ def test_remove_resting_player():
     session.prepare_round()
 
     # Find a resting player
-    resting_player = list(session.resting_players)[0]
+    resting_player = list(session.current_state.resting_players)[0]
 
     success, status = session.remove_player(resting_player)
     assert success is True
@@ -163,11 +163,11 @@ def test_update_courts_mid_session(sample_players, sample_gender_stats):
 
     # First round with 2 courts
     session.prepare_round()
-    assert len(session.current_round_matches) == 2
+    assert len(session.current_state.matches) == 2
     session.finalize_round(
         {
-            1: session.current_round_matches[0].team_1,
-            2: session.current_round_matches[1].team_1,
+            1: session.current_state.matches[0].team_1,
+            2: session.current_state.matches[1].team_1,
         }
     )
 
@@ -176,7 +176,7 @@ def test_update_courts_mid_session(sample_players, sample_gender_stats):
 
     # Second round should have 1 court
     session.prepare_round()
-    assert len(session.current_round_matches) == 1
+    assert len(session.current_state.matches) == 1
 
 
 def test_update_courts_to_zero_fails(sample_players, sample_gender_stats):
@@ -203,12 +203,12 @@ def test_multiple_rounds_all_succeed(sample_players, sample_gender_stats):
     for round_num in range(5):
         session.prepare_round()
         assert (
-            session.current_round_matches is not None
+            session.current_state.matches is not None
         ), f"Round {round_num + 1} failed"
-        assert len(session.current_round_matches) == 2
+        assert len(session.current_state.matches) == 2
 
         # Finalize with team_1 winning on all courts
-        winners = {i + 1: session.current_round_matches[i].team_1 for i in range(2)}
+        winners = {i + 1: session.current_state.matches[i].team_1 for i in range(2)}
         session.finalize_round(winners)
 
 
@@ -223,10 +223,10 @@ def test_resting_players_rotate_fairly(sample_players, sample_gender_stats):
     for _ in range(8):  # 8 rounds for 8 players
         session.prepare_round()
 
-        for name in session.resting_players:
+        for name in session.current_state.resting_players:
             rest_counts[name] += 1
 
-        session.finalize_round({1: session.current_round_matches[0].team_1})
+        session.finalize_round({1: session.current_state.matches[0].team_1})
 
     # Each player should have rested exactly 4 times (4 rest per round, 8 rounds, 8 players)
     for name, count in rest_counts.items():
@@ -249,12 +249,12 @@ def test_session_singles_mode():
         players=players, num_courts=2, gender_stats=gender_stats, is_doubles=False
     )
 
-    assert session.players_per_court == 2
+    assert session.config.players_per_court == 2
 
     session.prepare_round()
-    assert len(session.current_round_matches) == 2
+    assert len(session.current_state.matches) == 2
 
-    for match in session.current_round_matches:
+    for match in session.current_state.matches:
         assert isinstance(match, SinglesMatch)
         assert match.player_1 is not None
         assert match.player_2 is not None
@@ -273,7 +273,7 @@ def test_get_standings_sorted(sample_players, sample_gender_stats):
 
     # Play a round
     session.prepare_round()
-    match = session.current_round_matches[0]
+    match = session.current_state.matches[0]
     session.finalize_round({1: match.team_1})
 
     standings = session.get_standings()

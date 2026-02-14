@@ -17,6 +17,7 @@ from constants import PAGE_SETUP, TTT_DEFAULT_MU
 from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
 from session_logic import ClubNightSession, Player, SessionManager
+import session_logic
 import session_service
 from app_types import Gender, SinglesMatch, DoublesMatch
 
@@ -42,19 +43,19 @@ def render_match_selection(
     """
     winners_by_court: dict[int, tuple[str, ...] | None] = {}
 
-    if not session.current_round_matches:
+    if not session.current_state.matches:
         st.warning(
             "No courts could be formed with the current number of active players."
         )
         return winners_by_court
 
-    for match in session.current_round_matches:
+    for match in session.current_state.matches:
         with st.container(border=True):
             cols = st.columns([1, 3], vertical_alignment="center")
             with cols[0]:
                 st.markdown(f"#### Court {match.court}")
             with cols[1]:
-                if session.is_doubles:
+                if session.config.is_doubles:
                     winner = _render_doubles_match(match, locked_pairs_set)
                 else:
                     winner = _render_singles_match(match)
@@ -160,21 +161,21 @@ def process_round_results(
 def render_court_controls(session: ClubNightSession, session_name: str) -> None:
     """Renders court add/remove controls in the sidebar."""
     with st.expander("🎾 Courts", expanded=False):
-        st.markdown(f"**Courts:** {int(session.num_courts)}")
+        st.markdown(f"**Courts:** {int(session.config.num_courts)}")
         col_add, col_remove = st.columns(2)
 
         with col_add:
             if st.button("Add court", key="add_court_btn", width="stretch"):
                 session_service.update_court_count(
-                    session, session_name, session.num_courts + 1
+                    session, session_name, session.config.num_courts + 1
                 )
                 st.rerun()
 
         with col_remove:
             if st.button("Remove court", key="remove_court_btn", width="stretch"):
-                if session.num_courts > 1:
+                if session.config.num_courts > 1:
                     session_service.update_court_count(
-                        session, session_name, session.num_courts - 1
+                        session, session_name, session.config.num_courts - 1
                     )
                     st.rerun()
                 else:
@@ -225,7 +226,7 @@ def _render_registry_player_add(
 
     # Show team name input in doubles mode (session-specific, not from database)
     team_name = ""
-    if session.is_doubles:
+    if session.config.is_doubles:
         team_name = st.text_input(
             "Team Name(s)",
             key="reg_add_team",
@@ -239,7 +240,7 @@ def _render_registry_player_add(
                 session=session,
                 session_name=session_name,
                 player=p,
-                team_name=team_name.strip() if session.is_doubles else "",
+                team_name=team_name.strip() if session.config.is_doubles else "",
             )
             if added:
                 st.success(f"Added {selected_name} to the session!")
@@ -261,7 +262,7 @@ def _render_guest_player_add(session: ClubNightSession, session_name: str) -> No
     )
 
     new_team_name = ""
-    if session.is_doubles:
+    if session.config.is_doubles:
         new_team_name = st.text_input(
             "Team Name(s)",
             key="mid_add_team",
@@ -341,7 +342,7 @@ def render_weights_section(session: ClubNightSession, session_name: str) -> None
             "Skill Balance",
             min_value=0.0,
             max_value=10.0,
-            value=float(session.weights.get("skill", 1.0)),
+            value=float(session.config.weights.get("skill", 1.0)),
             step=0.5,
             key="weight_skill",
             help="Group similar skill levels on the same court",
@@ -350,7 +351,7 @@ def render_weights_section(session: ClubNightSession, session_name: str) -> None
             "Team Power Balance",
             min_value=0.0,
             max_value=10.0,
-            value=float(session.weights.get("power", 1.0)),
+            value=float(session.config.weights.get("power", 1.0)),
             step=0.5,
             key="weight_power",
             help="Balance team strength within each court",
@@ -359,14 +360,14 @@ def render_weights_section(session: ClubNightSession, session_name: str) -> None
             "Pairing Variety",
             min_value=0.0,
             max_value=10.0,
-            value=float(session.weights.get("pairing", 1.0)),
+            value=float(session.config.weights.get("pairing", 1.0)),
             step=0.5,
             key="weight_pairing",
             help="Avoid repeating player matchups",
         )
 
         # Only update if values changed
-        current = session.weights
+        current = session.config.weights
         if (
             skill != current.get("skill")
             or power != current.get("power")
@@ -430,8 +431,13 @@ if "session" not in st.session_state or "current_session_name" not in st.session
 session: ClubNightSession = st.session_state.session
 session_name: str = st.session_state.current_session_name
 
+# --- Background Task Trigger ---
+# Ensure background backup calculation is running if we have a current state but no backup
+if session.current_state and not session.backup_state:
+    session.start_backup_calculation()
+
 # --- Main Layout ---
-game_mode_str = "Doubles" if session.is_doubles else "Singles"
+game_mode_str = "Doubles" if session.config.is_doubles else "Singles"
 st.title(f"🏸 {session_name} ({game_mode_str})", anchor=False)
 if not session.is_recorded:
     st.caption("⚠️ This session is not being recorded to the dataset.")
@@ -440,13 +446,15 @@ col_matches, col_standings = st.columns([2, 1])
 
 # Left column: Match selection form
 with col_matches:
-    st.header(f"Select Winners for Round {session.round_num}")
-    st.info(f"**Resting:** {', '.join(session.resting_players)}")
+    st.header(f"Select Winners for Round {session.current_state.round_num}")
+    st.info(f"**Resting:** {', '.join(session.current_state.resting_players)}")
 
     # Build locked pairs set for visual indicators from required partners graph
     locked_pairs_set: set[tuple[str, str]] = set()
-    if session.is_doubles:
-        required_partners = session.get_required_partners()
+    if session.config.is_doubles:
+        required_partners = session_logic.get_required_partners_graph(
+            session.player_pool, session.config.is_doubles
+        )
         for player, partners in required_partners.items():
             for partner in partners:
                 locked_pairs_set.add(tuple(sorted((player, partner))))

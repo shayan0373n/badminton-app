@@ -97,6 +97,36 @@ Match = SinglesMatch | DoublesMatch
 MatchList = list[Match]
 
 
+@dataclass
+class Round:
+    """Complete state of a match round.
+
+    Attributes:
+        matches: List of match assignments
+        court_history: State of court history AFTER this round's matches
+        resting_players: Set of player names who rested during this round
+        rest_queue: Order of the rest queue AFTER this round's rotation
+        round_num: The round number (1-indexed)
+    """
+
+    matches: MatchList
+    court_history: CourtHistory
+    resting_players: set[PlayerName]
+    rest_queue: list[PlayerName]
+    round_num: int
+
+
+@dataclass
+class SessionConfig:
+    """Session-wide configuration parameters."""
+
+    num_courts: int
+    is_doubles: bool
+    players_per_court: int
+    weights: dict[str, float]
+    gender_stats: GenderStats
+
+
 # =============================================================================
 # Result Data Classes
 # =============================================================================

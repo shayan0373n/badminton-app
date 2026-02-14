@@ -9,6 +9,7 @@ import logging
 import os
 import pickle
 import random
+import threading
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import combinations
@@ -20,6 +21,8 @@ from constants import (
     SOLVER_BACKEND,
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
+    OPTIMIZER_TIME_LIMIT_FAST,
+    OPTIMIZER_TIME_LIMIT_SLOW,
 )
 from exceptions import SessionError
 
@@ -36,6 +39,8 @@ from app_types import (
     PlayerName,
     PlayerPair,
     RequiredPartners,
+    Round,
+    SessionConfig,
 )
 
 logger = logging.getLogger("app.session_logic")
@@ -48,76 +53,111 @@ def _default_court_history_value() -> tuple[int, int]:
     return (0, 0)
 
 
-class RestRotationQueue:
-    """Manages fair rotation of which players rest each round.
+# =============================================================================
+# Functional Queue and Matching Helpers
+# =============================================================================
 
-    Maintains a queue where players at the front rest first, then rotate
-    to the back after resting. This ensures everyone gets roughly equal
-    play time over multiple rounds.
 
-    Precondition:
-        Player names must be unique. Behavior is undefined if duplicates
-        are present in the input list or added via add_player().
+def get_resting_players(
+    queue: list[PlayerName], num_courts: int, players_per_court: int
+) -> set[PlayerName]:
+    """Pure function to determine who should rest based on current queue."""
+    total_players = len(queue)
+    max_courts = total_players // players_per_court
+    active_courts = min(num_courts, max_courts)
+    num_to_play = active_courts * players_per_court
+    num_to_rest = total_players - num_to_play
+    return set(queue[:num_to_rest])
+
+
+def rotate_queue(queue: list[PlayerName], who_rested: set[PlayerName]) -> list[PlayerName]:
+    """Pure function to rotate the queue after a round."""
+    rested_in_order = [p for p in queue if p in who_rested]
+    random.shuffle(rested_in_order)
+    return [p for p in queue if p not in who_rested] + rested_in_order
+
+
+def get_required_partners_graph(
+    player_pool: dict[str, "Player"], is_doubles: bool
+) -> RequiredPartners:
+    """Standalone helper to build the partnership graph."""
+    if not is_doubles:
+        return {}
+
+    team_groups: dict[str, list[PlayerName]] = defaultdict(list)
+    for player_name, player in player_pool.items():
+        if player.team_name:
+            for team in player.team_name.split(","):
+                team = team.strip()
+                if team:
+                    team_groups[team].append(player_name)
+
+    required: RequiredPartners = defaultdict(set)
+    for members in team_groups.values():
+        if len(members) >= 2:
+            for p1, p2 in combinations(members, 2):
+                required[p1].add(p2)
+                required[p2].add(p1)
+    return dict(required)
+
+
+def generate_next_round(
+    current_state: Round,
+    config: SessionConfig,
+    player_pool: dict[str, "Player"],
+    time_limit: float,
+) -> Round | None:
+    """Pure function to calculate the next round based on current state and config.
+
+    This function is thread-safe as it does not modify any input objects.
     """
+    # 1. Determine who is resting
+    resting_players = get_resting_players(
+        current_state.rest_queue, config.num_courts, config.players_per_court
+    )
 
-    def __init__(self, players: list[PlayerName], shuffle: bool = True) -> None:
-        """Initialize the rotation queue.
+    # 2. Calculate active courts
+    max_courts = len(current_state.rest_queue) // config.players_per_court
+    active_courts = min(config.num_courts, max_courts)
 
-        Args:
-            players: List of player names to include in rotation
-            shuffle: Whether to randomize initial order (default True)
-        """
-        self._queue: list[PlayerName] = players.copy()
-        if shuffle:
-            random.shuffle(self._queue)
+    if active_courts == 0:
+        return None
 
-    def get_resting_players(
-        self, num_courts: int, players_per_court: int = 4
-    ) -> set[PlayerName]:
-        """Determine which players should rest this round.
+    # 3. Prepare ratings
+    player_genders = {p.name: p.gender for p in player_pool.values()}
+    tier_ratings, real_skills = prepare_optimizer_ratings(
+        player_pool, config.gender_stats
+    )
 
-        Args:
-            num_courts: Number of available courts
-            players_per_court: Players needed per court (4 for doubles, 2 for singles)
+    # 4. Get required partners
+    required_partners = get_required_partners_graph(player_pool, config.is_doubles)
 
-        Returns:
-            Set of player names who should rest this round
-        """
-        total_players = len(self._queue)
-        max_courts = total_players // players_per_court
-        active_courts = min(num_courts, max_courts)
-        num_to_play = active_courts * players_per_court
-        num_to_rest = total_players - num_to_play
+    # 5. Call the optimizer
+    result = generate_one_round(
+        tier_ratings=tier_ratings,
+        real_skills=real_skills,
+        player_genders=player_genders,
+        players_to_rest=resting_players,
+        num_courts=active_courts,
+        court_history=current_state.court_history,
+        players_per_court=config.players_per_court,
+        is_doubles=config.is_doubles,
+        required_partners=required_partners,
+        weights=config.weights,
+        time_limit=time_limit,
+    )
 
-        return set(self._queue[:num_to_rest])
+    if not result.success:
+        return None
 
-    def rotate_after_round(self, who_rested: set[PlayerName]) -> None:
-        """Move rested players to the end of the queue.
-
-        Call this after a successful round to advance the rotation.
-
-        Args:
-            who_rested: Set of players who rested this round
-        """
-        rested_in_order = [p for p in self._queue if p in who_rested]
-        random.shuffle(rested_in_order)
-        self._queue = [p for p in self._queue if p not in who_rested] + rested_in_order
-
-    def add_player(self, name: PlayerName) -> None:
-        """Add a new player to the end of the queue (will rest first)."""
-        if name not in self._queue:
-            self._queue.append(name)
-
-    def remove_player(self, name: PlayerName) -> None:
-        """Remove a player from the queue."""
-        if name in self._queue:
-            self._queue.remove(name)
-
-    def __len__(self) -> int:
-        return len(self._queue)
-
-    def __contains__(self, name: PlayerName) -> bool:
-        return name in self._queue
+    # 6. Return new state (Round N+1)
+    return Round(
+        matches=sorted(result.matches, key=lambda m: m.court),
+        court_history=result.court_history,
+        resting_players=resting_players,
+        rest_queue=rotate_queue(current_state.rest_queue, resting_players),
+        round_num=current_state.round_num + 1,
+    )
 
 
 @dataclass
@@ -226,7 +266,6 @@ class SessionManager:
 class ClubNightSession:
     """
     Orchestrates a club night session using the optimizer for match generation.
-    This class only contains game logic and no persistence code.
     """
 
     def __init__(
@@ -240,268 +279,164 @@ class ClubNightSession:
         is_recorded: bool = True,
     ) -> None:
         self.player_pool = players
-        self.num_courts = num_courts
-        self._gender_stats = gender_stats
+        self.config = SessionConfig(
+            num_courts=num_courts,
+            is_doubles=is_doubles,
+            players_per_court=(
+                PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
+            ),
+            weights=weights or {"skill": 1.0, "power": 1.0, "pairing": 1.0},
+            gender_stats=gender_stats,
+        )
         self.database_id = database_id
-        self.is_doubles = is_doubles
         self.is_recorded = is_recorded
-        self.players_per_court = (
-            PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
+
+        # Initialize with "Round 0" node
+        initial_queue = list(self.player_pool.keys())
+        random.shuffle(initial_queue)
+        self.current_state = Round(
+            matches=[],
+            court_history=defaultdict(_default_court_history_value),
+            resting_players=set(),
+            rest_queue=initial_queue,
+            round_num=0,
         )
-        self.round_num = 0
+        self.backup_state: Round | None = None
+        
+        # Threading state (not pickled)
+        self._backup_lock = threading.Lock()
+        self._backup_thread: threading.Thread | None = None
+        self.queued_removals: set[PlayerName] = set()
 
-        # State required for the optimizer
-        # CourtHistory values are (partner_count, opponent_count)
-        self.court_history: CourtHistory = defaultdict(_default_court_history_value)
-        self.weights = (
-            weights
-            if weights is not None
-            else {"skill": 1.0, "power": 1.0, "pairing": 1.0}
-        )
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state.pop("_backup_lock", None)
+        state.pop("_backup_thread", None)
+        return state
 
-        # Session flow state
-        self.current_round_matches: MatchList | None = None
-        self.resting_players: set[PlayerName] = set()
-        self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
-        self.queued_removals: set[PlayerName] = set()  # Players marked for removal
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._backup_lock = threading.Lock()
+        self._backup_thread = None
 
-    def get_required_partners(self) -> RequiredPartners:
-        """Build graph of required partner relationships from team memberships.
+    def start_backup_calculation(self) -> None:
+        """Triggers background calculation for the next round."""
+        with self._backup_lock:
+            if self._backup_thread and self._backup_thread.is_alive():
+                return
+            
+            # Prepare data for the thread
+            state_to_optimize = self.current_state
+            config = self.config
+            pool = self.player_pool
 
-        Players can belong to multiple teams (comma-separated team names).
-        Each team creates pairwise "must partner with" relationships between members.
+            def task():
+                logger.info("Starting background backup calculation (30s)")
+                new_backup = generate_next_round(
+                    state_to_optimize, config, pool, OPTIMIZER_TIME_LIMIT_SLOW
+                )
+                with self._backup_lock:
+                    self.backup_state = new_backup
+                    if new_backup:
+                        logger.info("Backup Round %d ready.", new_backup.round_num)
 
-        Returns:
-            Dict mapping each player to the set of players they must partner with
-            (when at least one is available).
-        """
-        # Parse comma-separated team names into groups
-        team_groups: dict[str, list[PlayerName]] = defaultdict(list)
-        for player_name, player in self.player_pool.items():
-            if player.team_name:
-                for team in player.team_name.split(","):
-                    team = team.strip()
-                    if team:
-                        team_groups[team].append(player_name)
-
-        # Build required partners graph from team memberships
-        required: RequiredPartners = defaultdict(set)
-        for members in team_groups.values():
-            if len(members) >= 2:
-                for p1, p2 in combinations(members, 2):
-                    required[p1].add(p2)
-                    required[p2].add(p1)
-        return dict(required)
+            self._backup_thread = threading.Thread(target=task, daemon=True)
+            self._backup_thread.start()
 
     def prepare_round(self) -> None:
-        """
-        Determines resting players and generates optimized matches for the next round.
-        """
-        self.round_num += 1
-
-        # Get required partners graph for this round (doubles only)
-        required_partners = self.get_required_partners() if self.is_doubles else {}
-
-        # 1. Determine who is resting using the rotation queue
-        self.resting_players = self._rest_queue.get_resting_players(
-            self.num_courts, self.players_per_court
-        )
-
-        # Calculate active courts for optimizer
-        total_players = len(self.player_pool)
-        max_courts = total_players // self.players_per_court
-        active_courts = min(self.num_courts, max_courts)
-
-        # Prepare dual ratings: tier (for grouping) and real skill (for fairness)
-        player_genders = {p.name: p.gender for p in self.player_pool.values()}
-        tier_ratings, real_skills = prepare_optimizer_ratings(
-            self.player_pool, self._gender_stats
-        )
-
-        # Call the optimizer with decoupled inputs
-        result = generate_one_round(
-            tier_ratings=tier_ratings,
-            real_skills=real_skills,
-            player_genders=player_genders,
-            players_to_rest=self.resting_players,
-            num_courts=active_courts,
-            court_history=self.court_history,
-            players_per_court=self.players_per_court,
-            is_doubles=self.is_doubles,
-            required_partners=required_partners,
-        )
-
-        if not result.success:
-            self.current_round_matches = None
-            return
-
-        matches = result.matches
-
-        # 4. Update state
-        self.court_history = result.court_history
-        self.current_round_matches = sorted(matches, key=lambda m: m.court)
-
-        # 4. Rotate the rest queue for the next round
-        self._rest_queue.rotate_after_round(self.resting_players)
+        """Determines next round. Uses backup or calculates fast."""
+        # 1. Try promotion
+        if self.backup_state and self.backup_state.round_num == self.current_state.round_num + 1:
+            self.current_state = self.backup_state
+            self.backup_state = None
+            logger.info("Promoted backup to Round %d.", self.current_state.round_num)
+        else:
+            # 2. Fast calculation
+            logger.info("Calculating fast Round %d...", self.current_state.round_num + 1)
+            new_state = generate_next_round(
+                self.current_state, self.config, self.player_pool, OPTIMIZER_TIME_LIMIT_FAST
+            )
+            if new_state:
+                self.current_state = new_state
+        
+        # 3. Always trigger next backup
+        self.start_backup_calculation()
 
     def finalize_round(self, winners_by_court: dict[int, tuple[str, ...]]) -> None:
-        """
-        Updates player ratings based on results.
-
-        Args:
-            winners_by_court: A dictionary mapping court numbers to the winning team tuple.
-
-        Raises:
-            SessionError: If no round has been prepared yet.
-        """
-        if self.current_round_matches is None:
-            raise SessionError("Cannot finalize a round that was not prepared.")
-
+        """Updates earned ratings and processes removals."""
         for court_num, winning_team in winners_by_court.items():
             for player_name in winning_team:
                 if player_name in self.player_pool:
                     self.player_pool[player_name].add_rating(1)
 
-        # Add a small rating boost to resting players
-        for player_name in self.resting_players:
+        for player_name in self.current_state.resting_players:
             if player_name in self.player_pool:
                 self.player_pool[player_name].add_rating(0.5)
 
-        # Clear the matches for the completed round
-        self.current_round_matches = None
-
-        # Process any queued player removals
+        self.current_state.matches = []
         for player_name in list(self.queued_removals):
             self._remove_player_now(player_name)
 
     def update_courts(self, new_num_courts: int) -> None:
-        """Updates available courts mid session; applies on the next prepared round."""
+        """Updates court count and invalidates backup."""
         new_num_courts = int(new_num_courts)
-        if new_num_courts < 1:
-            raise SessionError("Number of courts must be at least 1.")
-        self.num_courts = new_num_courts
+        if new_num_courts < 1: raise SessionError("Min 1 court.")
+        self.config.num_courts = new_num_courts
+        self.backup_state = None
+
+    def update_weights(self, weights: dict[str, float]) -> None:
+        """Updates weights and invalidates backup."""
+        self.config.weights = weights
+        self.backup_state = None
 
     def get_standings(self) -> list[tuple[str, float]]:
-        """Returns the current player ratings, sorted from highest to lowest."""
         standings = [(p.name, p.earned_rating) for p in self.player_pool.values()]
         return sorted(standings, key=lambda item: item[1], reverse=True)
 
     def get_persistent_state(self) -> dict:
-        """Returns session parameters to preserve across session termination.
-
-        This allows the next session to start with the same configuration.
-        """
         return {
             "player_pool": self.player_pool,
-            "num_courts": self.num_courts,
-            "is_doubles": self.is_doubles,
+            "num_courts": self.config.num_courts,
+            "is_doubles": self.config.is_doubles,
             "is_recorded": self.is_recorded,
-            "weights": self.weights.copy(),
-            "gender_stats": self._gender_stats,
+            "weights": self.config.weights.copy(),
+            "gender_stats": self.config.gender_stats,
         }
 
-    def add_player(
-        self,
-        name: str,
-        gender: Gender,
-        mu: float = TTT_DEFAULT_MU,
-        sigma: float = TTT_DEFAULT_SIGMA,
-        team_name: str = "",
-    ) -> bool:
-        """
-        Adds a new player mid-session.
+    def add_player(self, name: str, gender: Gender, mu: float = TTT_DEFAULT_MU, 
+                   sigma: float = TTT_DEFAULT_SIGMA, team_name: str = "") -> bool:
+        if name in self.player_pool: return False
 
-        - Appends the player to the end of the rest rotation queue.
-        - Initializes the player's earned score to the average earned score of existing players
-          so they are not disadvantaged in standings or court balance.
+        earned = 0.0
+        if self.player_pool:
+            earned = sum(p.earned_rating for p in self.player_pool.values()) / len(self.player_pool)
+            earned = round(earned * 2) / 2
 
-        Args:
-            name: Player's name (must be unique)
-            gender: Gender.MALE ('M') or Gender.FEMALE ('F')
-            mu: TTT mean skill estimate
-            sigma: TTT uncertainty (standard deviation)
-            team_name: Optional team name for permanent pairing
-
-        Returns:
-            True if added successfully, False if name already exists.
-        """
-        # Prevent duplicates by exact name match
-        if name in self.player_pool:
-            return False
-
-        # Create the player with base rating
-        new_player = Player(
-            name=name,
-            gender=gender,
-            mu=mu,
-            sigma=sigma,
-            team_name=team_name,
-        )
-
-        # Compute average earned among existing players (exclude the new one)
-        existing_players = self.player_pool.values()
-        avg_earned = 0.0
-        if existing_players:
-            avg_earned = sum(p.earned_rating for p in existing_players) / len(
-                existing_players
-            )
-            # Round to nearest half point
-            avg_earned = round(avg_earned * 2) / 2
-
-        # Use add_rating to keep rating and earned_rating in sync
-        new_player.add_rating(avg_earned)
-
-        # Add to rest queue and player pool
+        new_player = Player(name=name, gender=gender, mu=mu, sigma=sigma, team_name=team_name)
+        new_player.add_rating(earned)
+        
         self.player_pool[name] = new_player
-        self._rest_queue.add_player(name)
-        self.resting_players.add(name)
-
+        self.current_state.rest_queue.append(name)
+        self.backup_state = None
         return True
 
     def remove_player(self, name: str) -> tuple[bool, str]:
-        """
-        Marks a player for removal from the session.
-
-        - If player is currently playing, queues them for removal after round confirmation
-        - If player is resting or no round active, removes immediately
-
-        Args:
-            name: The player's name to remove
-
-        Returns:
-            Tuple of (success, status) where status is 'immediate', 'queued', or 'not_found'.
-        """
-        if name not in self.player_pool:
-            return False, "not_found"
-
-        # Check if player is currently playing (in current_round_matches)
-        is_playing = False
-        if self.current_round_matches:
-            for match in self.current_round_matches:
-                if not self.is_doubles:
-                    if name in [match.player_1, match.player_2]:
-                        is_playing = True
-                        break
-                else:  # Doubles
-                    if name in match.team_1 or name in match.team_2:
-                        is_playing = True
-                        break
-
+        if name not in self.player_pool: return False, "not_found"
+        
+        is_playing = any(name in (m.player_1, m.player_2) if not self.config.is_doubles 
+                        else name in m.team_1 + m.team_2 
+                        for m in self.current_state.matches)
+        
         if is_playing:
-            # Queue for removal after round confirmation
             self.queued_removals.add(name)
             return True, "queued"
-        else:
-            # Remove immediately
-            self._remove_player_now(name)
-            return True, "immediate"
+        
+        self._remove_player_now(name)
+        return True, "immediate"
 
     def _remove_player_now(self, name: str) -> None:
-        """Internal method to actually remove a player from all structures."""
-        if name in self.player_pool:
-            del self.player_pool[name]
-        self._rest_queue.remove_player(name)
-        if name in self.resting_players:
-            self.resting_players.remove(name)
-        if name in self.queued_removals:
-            self.queued_removals.remove(name)
+        if name in self.player_pool: del self.player_pool[name]
+        if name in self.current_state.rest_queue: self.current_state.rest_queue.remove(name)
+        if name in self.current_state.resting_players: self.current_state.resting_players.remove(name)
+        self.queued_removals.discard(name)
+        self.backup_state = None

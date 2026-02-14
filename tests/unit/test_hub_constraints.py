@@ -1,6 +1,10 @@
 import pytest
 from app_types import Gender, OptimizerResult
-from optimizer import generate_one_round
+from constants import SOLVER_BACKEND
+if SOLVER_BACKEND == "ortools":
+    from optimizer_ortools import generate_one_round
+else:
+    from optimizer import generate_one_round
 
 
 def test_hub_scenario_feasibility():

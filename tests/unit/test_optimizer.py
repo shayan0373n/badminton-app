@@ -1,5 +1,9 @@
 import pytest
-from optimizer import generate_one_round
+from constants import SOLVER_BACKEND
+if SOLVER_BACKEND == "ortools":
+    from optimizer_ortools import generate_one_round
+else:
+    from optimizer import generate_one_round
 from app_types import Gender, SinglesMatch, DoublesMatch
 from session_logic import Player
 from tests.utils import generate_random_players, run_optimizer_rounds

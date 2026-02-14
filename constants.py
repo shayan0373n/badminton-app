@@ -4,6 +4,7 @@ Centralized constants for the Badminton App.
 This module contains all configuration constants used throughout the application.
 """
 
+import os
 from datetime import datetime
 
 # =============================================================================
@@ -16,6 +17,14 @@ DEFAULT_IS_DOUBLES = True
 # Players per court by game mode
 PLAYERS_PER_COURT_DOUBLES = 4
 PLAYERS_PER_COURT_SINGLES = 2
+
+# =============================================================================
+# Solver Backend
+# =============================================================================
+# "ortools" uses Google OR-Tools CP-SAT solver (free, open source)
+# "gurobi" uses PuLP with Gurobi solver (requires commercial license)
+# Use environment variable 'SOLVER' to override the default backend.
+SOLVER_BACKEND = os.getenv("SOLVER", "gurobi").lower()
 
 # =============================================================================
 # Optimizer Constants
@@ -32,7 +41,8 @@ OPTIMIZER_SKILL_RANGE = OPTIMIZER_RANK_MAX - OPTIMIZER_RANK_MIN
 OPTIMIZER_BIG_M = 1000.0
 
 # Partner history multiplier: partners accumulate penalty faster than opponents
-# Penalty = PARTNER_HISTORY_MULTIPLIER * partner_count + opponent_count
+# If a pair are partners: Penalty = PARTNER_HISTORY_MULTIPLIER * partner_count
+# If a pair are opponents: Penalty = opponent_count
 PARTNER_HISTORY_MULTIPLIER = 2
 
 # Court history normalization divisor for doubles
@@ -52,6 +62,9 @@ DEFAULT_WEIGHTS = {
     "pairing": 1,
 }
 
+# Default time limit for the optimizer in seconds
+OPTIMIZER_TIME_LIMIT = 10.0
+
 # =============================================================================
 # TrueSkill Through Time Rating System Constants
 # =============================================================================
@@ -69,8 +82,17 @@ TTT_DEFAULT_MU = TTT_MU_AVERAGE
 TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
 
 # Game dynamics
-TTT_BETA = 4.0  # Performance variance (higher = more randomness)
-TTT_GAMMA = 0.55  # Skill drift per day (~0.5 sigma growth per 30 inactive days)
+# Beta models within-game randomness: a player's performance in a single game
+# is drawn from N(skill, beta²). With beta=4.0 and 1 level = 3.5 mu:
+#   beta/level = 4.0/3.5 ≈ 1.14 — a 1-level gap gives the stronger player
+#   ~76% win probability per rally. Higher beta = more upsets.
+TTT_BETA = 4.0  # Performance noise std dev per game
+# Gamma governs how much true skill can wander over time:
+#   drift_per_season = sqrt(num_days) * gamma
+# With weekly matches over 6 months (182 days):
+#   sqrt(182) * 0.13 = 1.75 mu ≈ 0.5 levels (1 level = 3.5 mu)
+# Previous value 0.55 allowed ~2.1 levels of drift per season.
+TTT_GAMMA = 0.13  # Skill drift per day (std dev of random walk per time unit)
 
 # =============================================================================
 # Gender Statistics Fallback Constants

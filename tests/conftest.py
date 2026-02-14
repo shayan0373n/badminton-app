@@ -5,6 +5,14 @@ from rating_service import compute_gender_statistics
 from session_logic import Player
 
 
+@pytest.fixture(params=["gurobi", "ortools"])
+def solver_backend(request, monkeypatch):
+    """Fixture that runs a test for each solver backend."""
+    import constants
+    monkeypatch.setattr(constants, "SOLVER_BACKEND", request.param)
+    return request.param
+
+
 @pytest.fixture
 def sample_players():
     """Returns a dictionary of sample players."""

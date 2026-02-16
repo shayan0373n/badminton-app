@@ -10,6 +10,7 @@ import os
 import pickle
 import random
 from collections import defaultdict
+from copy import deepcopy
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -17,6 +18,7 @@ from constants import (
     DEFAULT_IS_DOUBLES,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
+    SESSION_PERFORMANCE_FACTOR,
     SOLVER_BACKEND,
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
@@ -312,10 +314,14 @@ class ClubNightSession:
         max_courts = total_players // self.players_per_court
         active_courts = min(self.num_courts, max_courts)
 
-        # Prepare dual ratings: tier (for grouping) and real skill (for fairness)
+        # Boost mu by session performance for matchmaking
+        boosted_pool = deepcopy(self.player_pool)
+        for p in boosted_pool.values():
+            p.mu += p.earned_rating * SESSION_PERFORMANCE_FACTOR
+
         player_genders = {p.name: p.gender for p in self.player_pool.values()}
         tier_ratings, real_skills = prepare_optimizer_ratings(
-            self.player_pool, self._gender_stats
+            boosted_pool, self._gender_stats
         )
 
         # Call the optimizer with decoupled inputs

@@ -265,6 +265,43 @@ def test_session_singles_mode():
 # =============================================================================
 
 
+def test_session_performance_boosts_matchmaking():
+    """Winners should be grouped together in subsequent rounds due to mu boost."""
+    players = {
+        f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=25.0)
+        for i in range(1, 9)
+    }
+    gender_stats = compute_gender_statistics(players)
+    session = ClubNightSession(
+        players=players,
+        num_courts=2,
+        gender_stats=gender_stats,
+        is_doubles=True,
+        weights={"skill": 1.0, "power": 1.0, "pairing": 0.0},
+    )
+
+    # Round 1: all identical, matchmaking is arbitrary
+    session.prepare_round()
+    matches = session.current_round_matches
+    assert len(matches) == 2
+
+    # team_1 wins on both courts
+    winners = set(matches[0].team_1 + matches[1].team_1)
+    session.finalize_round({
+        matches[0].court: matches[0].team_1,
+        matches[1].court: matches[1].team_1,
+    })
+
+    # Round 2: winners (boosted mu) should land on the same court
+    session.prepare_round()
+    matches = session.current_round_matches
+    assert len(matches) == 2
+
+    court1_players = set(matches[0].team_1 + matches[0].team_2)
+    court2_players = set(matches[1].team_1 + matches[1].team_2)
+    assert court1_players == winners or court2_players == winners
+
+
 def test_get_standings_sorted(sample_players, sample_gender_stats):
     """Standings should be sorted by earned rating descending."""
     session = ClubNightSession(

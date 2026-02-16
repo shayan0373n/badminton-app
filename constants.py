@@ -94,6 +94,11 @@ TTT_BETA = 4.0  # Performance noise std dev per game
 # Previous value 0.55 allowed ~2.1 levels of drift per season.
 TTT_GAMMA = 0.13  # Skill drift per day (std dev of random walk per time unit)
 
+# Session performance feedback: fraction of earned_rating added to mu for
+# matchmaking within a session.  earned_rating grows by +1 per win and +0.5
+# per rest, so this effectively adds +0.5 mu per win and +0.25 mu per rest.
+SESSION_PERFORMANCE_FACTOR = 0.5
+
 # =============================================================================
 # Gender Statistics Fallback Constants
 #

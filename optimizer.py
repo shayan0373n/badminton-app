@@ -48,13 +48,12 @@ def get_partnership_penalty(
     return float(partner_count * PARTNER_HISTORY_MULTIPLIER)
 
 
-def get_opponent_penalty(
+def get_same_court_penalty(
     pair: PlayerPair, court_history: CourtHistory
 ) -> float:
-    """Calculate the penalty for a pair being opponents.
-    Only considers previous times they were opponents."""
-    _, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
-    return float(opponent_count)
+    """Calculate the base penalty for a pair sharing a court in any role."""
+    partner_count, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
+    return float(partner_count + opponent_count)
 
 
 # ============================================================================
@@ -117,9 +116,9 @@ def generate_singles_round(
     )
 
     # Court history objective (minimize sharing court with same players)
-    # In singles, all pairs are opponents (no partners)
+    # In singles, all pairs are opponents (no partners), so we just use same_court_penalty
     total_court_history_objective = pulp.lpSum(
-        o[pair][c] * get_opponent_penalty(pair, court_history)
+        o[pair][c] * get_same_court_penalty(pair, court_history)
         for pair in player_pairs
         for c in range(num_courts)
     )
@@ -313,11 +312,11 @@ def generate_one_round(
         max_team_power[c] - min_team_power[c] for c in range(num_courts)
     )
 
-    # Court history objective: penalize repeating partnerships (t) and opponents (s-t)
+    # Court history objective: penalize sharing the court (s) and repeating partnerships (t)
     total_court_history_objective = (
         pulp.lpSum(
-            t[pair][c] * get_partnership_penalty(pair, court_history)
-            + (s[pair][c] - t[pair][c]) * get_opponent_penalty(pair, court_history)
+            s[pair][c] * get_same_court_penalty(pair, court_history)
+            + t[pair][c] * get_partnership_penalty(pair, court_history)
             for pair in player_pairs
             for c in range(num_courts)
         )

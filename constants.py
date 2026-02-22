@@ -41,12 +41,11 @@ OPTIMIZER_SKILL_RANGE = OPTIMIZER_RANK_MAX - OPTIMIZER_RANK_MIN
 OPTIMIZER_BIG_M = 1000.0
 
 # Partner history multiplier: partners accumulate penalty faster than opponents
-# If a pair are partners: Penalty = PARTNER_HISTORY_MULTIPLIER * partner_count
-# If a pair are opponents: Penalty = opponent_count
-PARTNER_HISTORY_MULTIPLIER = 2
+# Used as an additional penalty on top of the base same-court penalty.
+PARTNER_HISTORY_MULTIPLIER = 1
 
 # Court history normalization divisor for doubles
-# With 2 partner pairs (×2 weight) + 4 opponent pairs (×1 weight) = 8 penalty units per court
+# With 6 pair combinations sharing a court (base 1) + 2 partner pairs (added multiplier 1) = 8 penalty units
 # Dividing by 4 normalizes to ~2 units per court
 COURT_HISTORY_NORMALIZATION = 4
 

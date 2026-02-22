@@ -21,7 +21,7 @@ from constants import (
     COURT_HISTORY_NORMALIZATION,
     OPTIMIZER_TIME_LIMIT,
 )
-from optimizer import get_partnership_penalty, get_opponent_penalty
+from optimizer import get_partnership_penalty, get_same_court_penalty
 from app_types import (
     OptimizerResult,
     CourtHistory,
@@ -149,7 +149,7 @@ def generate_singles_round(
 
     # Pairing: minimize repeated opponents (penalty * RATING_SCALE for scale parity)
     pairing_obj = sum(
-        o[pair, c] * int(get_opponent_penalty(pair, court_history)) * RATING_SCALE
+        o[pair, c] * int(get_same_court_penalty(pair, court_history)) * RATING_SCALE
         for pair in player_pairs
         for c in range(num_courts)
     )
@@ -416,8 +416,8 @@ def generate_one_round(
 
     pairing_obj = sum(
         (
-            t[pair, c] * int(get_partnership_penalty(pair, court_history))
-            + (s[pair, c] - t[pair, c]) * int(get_opponent_penalty(pair, court_history))
+            s[pair, c] * int(get_same_court_penalty(pair, court_history))
+            + t[pair, c] * int(get_partnership_penalty(pair, court_history))
         )
         * PAIRING_SCALE
         for pair in player_pairs

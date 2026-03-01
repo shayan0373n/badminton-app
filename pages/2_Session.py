@@ -24,6 +24,32 @@ logger = logging.getLogger("app.session_page")
 
 
 # =============================================================================
+# UI Utilities
+# =============================================================================
+
+
+def format_display_name(name: str, max_length: int = 14) -> str:
+    """Shortens a name for display (e.g., 'Christopher Smith' -> 'Christopher S.')."""
+    if len(name) <= max_length:
+        return name
+
+    parts = name.split()
+    if len(parts) > 1:
+        # Try 'First L.' format
+        first = parts[0]
+        last_initial = parts[-1][0]
+        formatted = f"{first} {last_initial}."
+        if len(formatted) <= max_length:
+            return formatted
+        # Try just 'First' if still too long
+        if len(first) <= max_length:
+            return first
+
+    # Fallback to simple truncation
+    return name[: max_length - 2] + ".."
+
+
+# =============================================================================
 # Core UI Rendering Functions
 # =============================================================================
 
@@ -66,17 +92,19 @@ def render_match_selection(
 def _render_singles_match(match: SinglesMatch) -> tuple[str, ...] | None:
     """Renders a singles match selector and returns the winner."""
     p1, p2 = match.player_1, match.player_2
+
+    # Map display names to actual names
+    display_to_real = {format_display_name(p1): p1, format_display_name(p2): p2}
+
     selection = st.segmented_control(
         "Select Winner",
-        (p1, p2),
+        options=list(display_to_real.keys()),
         key=f"court_{match.court}",
         label_visibility="collapsed",
     )
-    if selection == p1:
-        return (p1,)
-    elif selection == p2:
-        return (p2,)
-    return None
+
+    real_winner = display_to_real.get(selection)
+    return (real_winner,) if real_winner else None
 
 
 def _render_doubles_match(
@@ -86,27 +114,32 @@ def _render_doubles_match(
     team_1, team_2 = match.team_1, match.team_2
     lock_icon = "🔗"
 
-    # Build display names with lock indicators
-    team_1_display = f"{team_1[0]} -- {team_1[1]}"
-    team_2_display = f"{team_2[0]} -- {team_2[1]}"
+    # Format names for display
+    t1_p1 = format_display_name(team_1[0], max_length=10)
+    t1_p2 = format_display_name(team_1[1], max_length=10)
+    t2_p1 = format_display_name(team_2[0], max_length=10)
+    t2_p2 = format_display_name(team_2[1], max_length=10)
+
+    # Build display names
+    team_1_display = f"{t1_p1} & {t1_p2}"
+    team_2_display = f"{t2_p1} & {t2_p2}"
 
     if tuple(sorted(team_1)) in locked_pairs_set:
         team_1_display = f"{lock_icon} {team_1_display}"
     if tuple(sorted(team_2)) in locked_pairs_set:
         team_2_display = f"{lock_icon} {team_2_display}"
 
+    # Map display names back to actual team tuples
+    display_to_real = {team_1_display: team_1, team_2_display: team_2}
+
     selection = st.segmented_control(
         "Select Winner",
-        (team_1_display, team_2_display),
+        options=list(display_to_real.keys()),
         key=f"court_{match.court}",
         label_visibility="collapsed",
     )
 
-    if selection == team_1_display:
-        return team_1
-    elif selection == team_2_display:
-        return team_2
-    return None
+    return display_to_real.get(selection)
 
 
 # =============================================================================
@@ -441,7 +474,10 @@ col_matches, col_standings = st.columns([2, 1])
 # Left column: Match selection form
 with col_matches:
     st.header(f"Select Winners for Round {session.round_num}")
-    st.info(f"**Resting:** {', '.join(session.resting_players)}")
+    
+    # Format resting players for display
+    resting_names = [format_display_name(p, max_length=10) for p in sorted(session.resting_players)]
+    st.info(f"**Resting:** {', '.join(resting_names)}")
 
     # Build locked pairs set for visual indicators from required partners graph
     locked_pairs_set: set[tuple[str, str]] = set()

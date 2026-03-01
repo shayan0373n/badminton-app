@@ -148,7 +148,7 @@ def recalculate_all_ratings() -> None:
         gamma=TTT_GAMMA,
     )
 
-    iterations = history.convergence(iterations=30)
+    iterations = history.convergence(iterations=50)
     logger.info(f"  Converged in {iterations} iterations")
 
     # 6. Extract final ratings

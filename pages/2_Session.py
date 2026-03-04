@@ -3,10 +3,11 @@
 Session management page for the Badminton App.
 
 This page displays the current round's matches and allows users to:
-- Select winners for each court
+- Navigate between rounds with prev/next buttons
+- Select winners for each court (auto-saved on change)
 - View current standings
 - Manage courts and players mid-session
-- Match data is saved for TrueSkill Through Time rating updates
+- Submit all match results to the database
 """
 
 import logging
@@ -14,11 +15,11 @@ import pandas as pd
 import streamlit as st
 
 from constants import PAGE_SETUP, TTT_DEFAULT_MU
-from database import MatchDB, PlayerDB, SessionDB
+from database import PlayerDB
 from exceptions import DatabaseError
 from session_logic import ClubNightSession, Player, SessionManager
 import session_service
-from app_types import Gender, SinglesMatch, DoublesMatch
+from app_types import Gender, SinglesMatch, DoublesMatch, RoundRecord
 
 logger = logging.getLogger("app.session_page")
 
@@ -54,52 +55,71 @@ def format_display_name(name: str, max_length: int = 14) -> str:
 # =============================================================================
 
 
-def render_match_selection(
-    session: ClubNightSession, locked_pairs_set: set[tuple[str, str]]
-) -> dict[int, tuple[str, ...] | None]:
-    """Renders match selection controls and returns winner selections by court.
+def render_round_matches(
+    session: ClubNightSession,
+    session_name: str,
+    record: RoundRecord,
+    round_idx: int,
+    locked_pairs_set: set[tuple[str, str]],
+) -> None:
+    """Renders match selection controls for a round with auto-save.
 
     Args:
         session: The active club night session
+        session_name: Session name for persistence
+        record: The round record to display
+        round_idx: Index of this round in round_history (0-based)
         locked_pairs_set: Set of player name tuples representing locked teammate pairs
-
-    Returns:
-        Dictionary mapping court numbers to selected winner tuples (or None if not selected)
     """
-    winners_by_court: dict[int, tuple[str, ...] | None] = {}
-
-    if not session.current_round_matches:
+    if not record.matches:
         st.warning(
             "No courts could be formed with the current number of active players."
         )
-        return winners_by_court
+        return
 
-    for match in session.current_round_matches:
+    for match in record.matches:
         with st.container(border=True):
             cols = st.columns([1, 3], vertical_alignment="center")
             with cols[0]:
                 st.markdown(f"#### Court {match.court}")
             with cols[1]:
+                stored = record.winners_by_court.get(match.court)
                 if session.is_doubles:
-                    winner = _render_doubles_match(match, locked_pairs_set)
+                    selected = _render_doubles_match(
+                        match, locked_pairs_set, record.round_num, stored
+                    )
                 else:
-                    winner = _render_singles_match(match)
-                winners_by_court[match.court] = winner
+                    selected = _render_singles_match(match, record.round_num, stored)
 
-    return winners_by_court
+                # Auto-save on change
+                if selected != stored:
+                    session_service.save_court_result(
+                        session, session_name, round_idx, match.court, selected
+                    )
 
 
-def _render_singles_match(match: SinglesMatch) -> tuple[str, ...] | None:
+def _render_singles_match(
+    match: SinglesMatch,
+    round_num: int,
+    stored_winner: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
     """Renders a singles match selector and returns the winner."""
     p1, p2 = match.player_1, match.player_2
 
     # Map display names to actual names
     display_to_real = {format_display_name(p1): p1, format_display_name(p2): p2}
+    real_to_display = {v: k for k, v in display_to_real.items()}
+
+    # Compute default from stored winner
+    default = None
+    if stored_winner and stored_winner[0] in real_to_display:
+        default = real_to_display[stored_winner[0]]
 
     selection = st.segmented_control(
         "Select Winner",
         options=list(display_to_real.keys()),
-        key=f"court_{match.court}",
+        default=default,
+        key=f"round_{round_num}_court_{match.court}",
         label_visibility="collapsed",
     )
 
@@ -108,7 +128,10 @@ def _render_singles_match(match: SinglesMatch) -> tuple[str, ...] | None:
 
 
 def _render_doubles_match(
-    match: DoublesMatch, locked_pairs_set: set[tuple[str, str]]
+    match: DoublesMatch,
+    locked_pairs_set: set[tuple[str, str]],
+    round_num: int,
+    stored_winner: tuple[str, ...] | None,
 ) -> tuple[str, ...] | None:
     """Renders a doubles match selector with lock indicators for fixed pairs."""
     team_1, team_2 = match.team_1, match.team_2
@@ -131,58 +154,22 @@ def _render_doubles_match(
 
     # Map display names back to actual team tuples
     display_to_real = {team_1_display: team_1, team_2_display: team_2}
+    real_to_display = {team_1: team_1_display, team_2: team_2_display}
+
+    # Compute default from stored winner
+    default = None
+    if stored_winner and stored_winner in real_to_display:
+        default = real_to_display[stored_winner]
 
     selection = st.segmented_control(
         "Select Winner",
         options=list(display_to_real.keys()),
-        key=f"court_{match.court}",
+        default=default,
+        key=f"round_{round_num}_court_{match.court}",
         label_visibility="collapsed",
     )
 
     return display_to_real.get(selection)
-
-
-# =============================================================================
-# Match Recording and Round Processing
-# =============================================================================
-
-
-def process_round_results(
-    session: ClubNightSession,
-    session_name: str,
-    winners_by_court: dict[int, tuple[str, ...]],
-) -> bool:
-    """Validates, records, and finalizes round results.
-
-    Returns:
-        True if processing succeeded and a rerun is needed, False otherwise.
-    """
-    # Validate all courts have winners selected
-    if not winners_by_court:
-        st.warning("Cannot process results as no courts were available.")
-        return False
-
-    if not all(v is not None for v in winners_by_court.values()):
-        st.warning("Please select a winner for each court before submitting.")
-        return False
-
-    # Process round completion via service
-    try:
-        session_service.process_round_completion(
-            session, session_name, winners_by_court
-        )
-    except DatabaseError as e:
-        # Check if it was a partial failure (matches recorded but maybe not all?)
-        # Actually session_service raises before finalizing if recording fails,
-        # preventing state corruption.
-        st.warning(f"Could not record matches to cloud: {e}")
-        # Behavior decision: Do we stop or continue?
-        # Current logic allowed continuing but warned.
-        # The service method aborted.
-        # Let's assume strict consistency for now -> return False
-        return False
-
-    return True
 
 
 # =============================================================================
@@ -334,7 +321,7 @@ def render_remove_player_section(session: ClubNightSession, session_name: str) -
                 f"⏳ Queued for removal: {', '.join(sorted(session.queued_removals))}"
             )
             st.caption(
-                "These players will be removed when you confirm the current round results."
+                "These players will be removed when you advance to the next round."
             )
 
         all_players = list(session.player_pool.keys())
@@ -354,11 +341,11 @@ def render_remove_player_section(session: ClubNightSession, session_name: str) -
             )
             if success:
                 if status == "immediate":
-                    st.success(f"✅ Removed {player_to_remove} from the session.")
+                    st.success(f"Removed {player_to_remove} from the session.")
                 elif status == "queued":
                     st.info(
                         f"⏳ {player_to_remove} is currently playing and will be "
-                        "removed after you confirm this round's results."
+                        "removed when you advance to the next round."
                     )
                 st.rerun()
             else:
@@ -411,6 +398,34 @@ def render_weights_section(session: ClubNightSession, session_name: str) -> None
                 )
                 st.success("Weights updated!")
                 st.rerun()
+
+
+def render_submit_results(session: ClubNightSession, session_name: str) -> None:
+    """Renders the submit results button for uploading matches to DB."""
+    if not session.is_recorded:
+        return
+
+    with st.expander("📤 Submit Results", expanded=False):
+        st.caption("Upload all match results to the database.")
+
+        # Count unreported courts across all rounds
+        total_unreported = sum(
+            len(r.matches) - len(r.winners_by_court)
+            for r in session.round_history
+        )
+        if total_unreported > 0:
+            st.warning(f"{total_unreported} court(s) have no winner selected.")
+
+        if st.button("Submit Results to Database", key="submit_results_btn"):
+            try:
+                recorded, unreported = session_service.submit_session_results(
+                    session, session_name
+                )
+                st.success(f"Uploaded {recorded} match(es).")
+                if unreported > 0:
+                    st.info(f"{unreported} court(s) skipped (no winner selected).")
+            except DatabaseError as e:
+                st.error(f"Failed to submit results: {e}")
 
 
 def handle_session_termination(session: ClubNightSession, session_name: str) -> None:
@@ -471,28 +486,67 @@ if not session.is_recorded:
 
 col_matches, col_standings = st.columns([2, 1])
 
-# Left column: Match selection form
+# Left column: Matches with round navigation
 with col_matches:
-    st.header(f"Select Winners for Round {session.round_num}")
-    
-    # Format resting players for display
-    resting_names = [format_display_name(p, max_length=10) for p in sorted(session.resting_players)]
-    st.info(f"**Resting:** {', '.join(resting_names)}")
+    if not session.round_history:
+        st.warning("No rounds generated yet.")
+    else:
+        # Initialize viewing index to latest round
+        if "viewing_round_idx" not in st.session_state:
+            st.session_state.viewing_round_idx = len(session.round_history) - 1
 
-    # Build locked pairs set for visual indicators from required partners graph
-    locked_pairs_set: set[tuple[str, str]] = set()
-    if session.is_doubles:
-        required_partners = session.get_required_partners()
-        for player, partners in required_partners.items():
-            for partner in partners:
-                locked_pairs_set.add(tuple(sorted((player, partner))))
+        # Clamp to valid range (in case rounds were added)
+        max_idx = len(session.round_history) - 1
+        view_idx = min(st.session_state.viewing_round_idx, max_idx)
+        view_idx = max(view_idx, 0)
 
-    with st.form(key="results_form"):
-        winners_by_court = render_match_selection(session, locked_pairs_set)
-        submitted = st.form_submit_button("✅ Confirm Results")
+        is_latest = view_idx == max_idx
+        record = session.round_history[view_idx]
 
-        if submitted and process_round_results(session, session_name, winners_by_court):
-            st.rerun()
+        # Round navigation: < | Round N of M | > / Generate Next Round
+        nav_cols = st.columns([1, 3, 1])
+        with nav_cols[0]:
+            if view_idx > 0:
+                if st.button("◀", key="prev_round", use_container_width=True):
+                    st.session_state.viewing_round_idx = view_idx - 1
+                    st.rerun()
+        with nav_cols[1]:
+            st.markdown(
+                f"<h3 style='text-align: center; margin: 0;'>Round {record.round_num} of {session.round_num}</h3>",
+                unsafe_allow_html=True,
+            )
+        with nav_cols[2]:
+            if is_latest:
+                if st.button("Next ▶", key="next_round", use_container_width=True):
+                    session_service.advance_to_next_round(session, session_name)
+                    st.session_state.viewing_round_idx = len(session.round_history) - 1
+                    st.rerun()
+            else:
+                if st.button("▶", key="next_round", use_container_width=True):
+                    st.session_state.viewing_round_idx = view_idx + 1
+                    st.rerun()
+
+        # Resting players
+        resting_names = [
+            format_display_name(p, max_length=10)
+            for p in sorted(record.resting_players)
+            if p in session.player_pool  # exclude removed players
+        ]
+        if resting_names:
+            st.info(f"**Resting:** {', '.join(resting_names)}")
+
+        # Build locked pairs set for visual indicators
+        locked_pairs_set: set[tuple[str, str]] = set()
+        if session.is_doubles:
+            required_partners = session.get_required_partners()
+            for player, partners in required_partners.items():
+                for partner in partners:
+                    locked_pairs_set.add(tuple(sorted((player, partner))))
+
+        # Render matches with auto-save
+        render_round_matches(
+            session, session_name, record, view_idx, locked_pairs_set
+        )
 
 # Right column: Standings
 with col_standings:
@@ -512,4 +566,5 @@ with st.sidebar:
     render_add_player_section(session, session_name)
     render_remove_player_section(session, session_name)
     render_weights_section(session, session_name)
+    render_submit_results(session, session_name)
     handle_session_termination(session, session_name)

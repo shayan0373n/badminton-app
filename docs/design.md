@@ -44,7 +44,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `session_service.py` | Orchestrates session operations (create, record matches, add/remove players). Bridges UI and domain/database layers. |
+| `session_service.py` | Orchestrates session operations (create, advance rounds, save court results, submit results to DB, add/remove players). Bridges UI and domain/database layers. |
 | `player_service.py` | Handles player registry management. Converts between `Player` objects and DataFrames for the UI, and synchronizes changes to the database. |
 | `rating_service.py` | Computes tier ratings (Z-score normalized for court grouping) and real skills (raw normalized for team fairness). Implements organic gender balancing via statistics. |
 
@@ -84,11 +84,18 @@ A dataclass representing a player with TrueSkill ratings:
 - `database_id` — optional foreign key to the Supabase players table
 - `team_name` — optional partnership group for doubles constraints
 
+### `RoundRecord` (app_types.py)
+Record of a single round in session history:
+- `round_num`, `matches`, `resting_players`, `winners_by_court`
+- Missing keys in `winners_by_court` = unreported courts
+
 ### `ClubNightSession` (session_logic.py)
 Orchestrates a club night session:
-- Holds the player table, round state, court history
+- Holds the player table, `round_history: list[RoundRecord]`, court history
+- `round_num`, `current_round_matches`, `resting_players` are `@property` accessors derived from `round_history[-1]`
 - Delegates match generation to the optimizer
-- Methods: `prepare_round()`, `finalize_round()`, `add_player()`, `remove_player()`
+- Methods: `prepare_round()`, `finalize_round()`, `set_court_result()`, `recompute_earned_ratings()`, `add_player()`, `remove_player()`
+- `add_player()` retroactively adds the new player to `resting_players` for all past rounds, then recomputes earned ratings (catch-up via rest bonus)
 
 ### `SessionManager` (session_logic.py)
 Static class for session file persistence (pickle to `sessions/` directory):
@@ -169,10 +176,10 @@ pytest
    - Click "Start Session" → calls `session_service.create_new_session()`
 
 2. **Session Page** (`pages/2_Session.py`)
-   - Displays current round matches
-   - User selects winners per court
-   - "Submit" → calls `session_service.process_round_completion()`
-   - Round results recorded to DB, next round generated
+   - Navigate between rounds with prev/next buttons
+   - Select winners per court (auto-saved on change via `session_service.save_court_result()`)
+   - "Next ▶" on latest round → calls `session_service.advance_to_next_round()` (partial results OK)
+   - "Submit Results" in sidebar → calls `session_service.submit_session_results()` (idempotent: deletes + re-inserts all matches for the session)
 
 3. **Rating Recalculation** (`recalculate_ratings.py`)
    - Standalone script, run manually

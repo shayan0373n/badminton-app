@@ -31,6 +31,7 @@ else:
     from optimizer import generate_one_round
 from rating_service import prepare_optimizer_ratings
 from app_types import (
+    DoublesMatch,
     Gender,
     GenderStats,
     MatchList,
@@ -38,6 +39,7 @@ from app_types import (
     PlayerName,
     PlayerPair,
     RequiredPartners,
+    RoundRecord,
 )
 
 logger = logging.getLogger("app.session_logic")
@@ -250,7 +252,6 @@ class ClubNightSession:
         self.players_per_court = (
             PLAYERS_PER_COURT_DOUBLES if is_doubles else PLAYERS_PER_COURT_SINGLES
         )
-        self.round_num = 0
 
         # State required for the optimizer
         # CourtHistory values are (partner_count, opponent_count)
@@ -262,10 +263,30 @@ class ClubNightSession:
         )
 
         # Session flow state
-        self.current_round_matches: MatchList | None = None
-        self.resting_players: set[PlayerName] = set()
+        self.round_history: list[RoundRecord] = []
+        self._round_active: bool = False
         self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
         self.queued_removals: set[PlayerName] = set()  # Players marked for removal
+
+    # -------------------------------------------------------------------------
+    # Properties (derived from round_history)
+    # -------------------------------------------------------------------------
+
+    @property
+    def round_num(self) -> int:
+        return len(self.round_history)
+
+    @property
+    def current_round_matches(self) -> MatchList | None:
+        if not self.round_history:
+            return None
+        return self.round_history[-1].matches
+
+    @property
+    def resting_players(self) -> set[PlayerName]:
+        if not self.round_history:
+            return set()
+        return self.round_history[-1].resting_players
 
     def get_required_partners(self) -> RequiredPartners:
         """Build graph of required partner relationships from team memberships.
@@ -296,16 +317,16 @@ class ClubNightSession:
         return dict(required)
 
     def prepare_round(self) -> None:
-        """
-        Determines resting players and generates optimized matches for the next round.
-        """
-        self.round_num += 1
+        """Determines resting players and generates optimized matches for the next round.
 
+        On success, appends a new RoundRecord to round_history.
+        On failure, no state is modified.
+        """
         # Get required partners graph for this round (doubles only)
         required_partners = self.get_required_partners() if self.is_doubles else {}
 
-        # 1. Determine who is resting using the rotation queue
-        self.resting_players = self._rest_queue.get_resting_players(
+        # Determine who is resting using the rotation queue
+        resting = self._rest_queue.get_resting_players(
             self.num_courts, self.players_per_court
         )
 
@@ -329,7 +350,7 @@ class ClubNightSession:
             tier_ratings=tier_ratings,
             real_skills=real_skills,
             player_genders=player_genders,
-            players_to_rest=self.resting_players,
+            players_to_rest=resting,
             num_courts=active_courts,
             court_history=self.court_history,
             players_per_court=self.players_per_court,
@@ -338,43 +359,34 @@ class ClubNightSession:
         )
 
         if not result.success:
-            self.current_round_matches = None
             return
 
-        matches = result.matches
-
-        # 4. Update state
+        # Commit state only on success
+        record = RoundRecord(
+            round_num=len(self.round_history) + 1,
+            matches=sorted(result.matches, key=lambda m: m.court),
+            resting_players=resting,
+        )
+        self.round_history.append(record)
+        self._round_active = True
         self.court_history = result.court_history
-        self.current_round_matches = sorted(matches, key=lambda m: m.court)
+        self._rest_queue.rotate_after_round(resting)
 
-        # 4. Rotate the rest queue for the next round
-        self._rest_queue.rotate_after_round(self.resting_players)
+    def finalize_round(self) -> None:
+        """Finalizes the current round: recomputes ratings and processes removals.
 
-    def finalize_round(self, winners_by_court: dict[int, tuple[str, ...]]) -> None:
-        """
-        Updates player ratings based on results.
-
-        Args:
-            winners_by_court: A dictionary mapping court numbers to the winning team tuple.
+        Reads winners from round_history[-1].winners_by_court. Partial results are OK —
+        only reported courts award points. Uses recompute_earned_ratings() so that
+        calling finalize_round() after auto-save is idempotent (no double-counting).
 
         Raises:
             SessionError: If no round has been prepared yet.
         """
-        if self.current_round_matches is None:
+        if not self.round_history:
             raise SessionError("Cannot finalize a round that was not prepared.")
 
-        for court_num, winning_team in winners_by_court.items():
-            for player_name in winning_team:
-                if player_name in self.player_pool:
-                    self.player_pool[player_name].add_rating(1)
-
-        # Add a small rating boost to resting players
-        for player_name in self.resting_players:
-            if player_name in self.player_pool:
-                self.player_pool[player_name].add_rating(0.5)
-
-        # Clear the matches for the completed round
-        self.current_round_matches = None
+        self._round_active = False
+        self.recompute_earned_ratings()
 
         # Process any queued player removals
         for player_name in list(self.queued_removals):
@@ -386,6 +398,57 @@ class ClubNightSession:
         if new_num_courts < 1:
             raise SessionError("Number of courts must be at least 1.")
         self.num_courts = new_num_courts
+
+    def set_court_result(
+        self, round_idx: int, court_num: int, winner: tuple[str, ...] | None
+    ) -> None:
+        """Sets or clears a single court result in round history.
+
+        Args:
+            round_idx: Index into round_history (0-based)
+            court_num: Court number (1-indexed)
+            winner: Winning team tuple, or None to clear
+        """
+        if round_idx < 0 or round_idx >= len(self.round_history):
+            raise SessionError(f"Invalid round index: {round_idx}")
+
+        record = self.round_history[round_idx]
+        if winner is None:
+            record.winners_by_court.pop(court_num, None)
+        else:
+            record.winners_by_court[court_num] = winner
+
+    def recompute_earned_ratings(self) -> None:
+        """Recomputes all earned_ratings from round_history.
+
+        Resets every player's earned_rating to 0.0, then replays all recorded
+        wins (+1.0) and rests (+0.5) from history. Only awards to players
+        still in the player pool.
+        """
+        for player in self.player_pool.values():
+            player.earned_rating = 0.0
+
+        for record in self.round_history:
+            for winning_team in record.winners_by_court.values():
+                for name in winning_team:
+                    if name in self.player_pool:
+                        self.player_pool[name].add_rating(1.0)
+            for name in record.resting_players:
+                if name in self.player_pool:
+                    self.player_pool[name].add_rating(0.5)
+
+    @staticmethod
+    def _get_match_players(matches: MatchList) -> set[PlayerName]:
+        """Extracts all player names from a list of matches."""
+        players: set[PlayerName] = set()
+        for match in matches:
+            if isinstance(match, DoublesMatch):
+                players.update(match.team_1)
+                players.update(match.team_2)
+            else:
+                players.add(match.player_1)
+                players.add(match.player_2)
+        return players
 
     def get_standings(self) -> list[tuple[str, float]]:
         """Returns the current player ratings, sorted from highest to lowest."""
@@ -414,12 +477,11 @@ class ClubNightSession:
         sigma: float = TTT_DEFAULT_SIGMA,
         team_name: str = "",
     ) -> bool:
-        """
-        Adds a new player mid-session.
+        """Adds a new player mid-session.
 
-        - Appends the player to the end of the rest rotation queue.
-        - Initializes the player's earned score to the average earned score of existing players
-          so they are not disadvantaged in standings or court balance.
+        Retroactively adds the player to resting_players for all past rounds
+        where they weren't playing, then recomputes earned ratings so they
+        get +0.5 per missed round as catch-up.
 
         Args:
             name: Player's name (must be unique)
@@ -431,11 +493,9 @@ class ClubNightSession:
         Returns:
             True if added successfully, False if name already exists.
         """
-        # Prevent duplicates by exact name match
         if name in self.player_pool:
             return False
 
-        # Create the player with base rating
         new_player = Player(
             name=name,
             gender=gender,
@@ -444,23 +504,17 @@ class ClubNightSession:
             team_name=team_name,
         )
 
-        # Compute average earned among existing players (exclude the new one)
-        existing_players = self.player_pool.values()
-        avg_earned = 0.0
-        if existing_players:
-            avg_earned = sum(p.earned_rating for p in existing_players) / len(
-                existing_players
-            )
-            # Round to nearest half point
-            avg_earned = round(avg_earned * 2) / 2
-
-        # Use add_rating to keep rating and earned_rating in sync
-        new_player.add_rating(avg_earned)
-
-        # Add to rest queue and player pool
         self.player_pool[name] = new_player
         self._rest_queue.add_player(name)
-        self.resting_players.add(name)
+
+        # Retroactively mark as resting in past rounds where not playing
+        for record in self.round_history:
+            playing = self._get_match_players(record.matches)
+            if name not in playing and name not in record.resting_players:
+                record.resting_players.add(name)
+
+        # Recompute so the retroactive resting awards catch-up points
+        self.recompute_earned_ratings()
 
         return True
 
@@ -480,18 +534,12 @@ class ClubNightSession:
         if name not in self.player_pool:
             return False, "not_found"
 
-        # Check if player is currently playing (in current_round_matches)
-        is_playing = False
-        if self.current_round_matches:
-            for match in self.current_round_matches:
-                if not self.is_doubles:
-                    if name in [match.player_1, match.player_2]:
-                        is_playing = True
-                        break
-                else:  # Doubles
-                    if name in match.team_1 or name in match.team_2:
-                        is_playing = True
-                        break
+        # Check if player is currently playing in an active (non-finalized) round
+        is_playing = (
+            self._round_active
+            and self.current_round_matches is not None
+            and name in self._get_match_players(self.current_round_matches)
+        )
 
         if is_playing:
             # Queue for removal after round confirmation
@@ -507,7 +555,4 @@ class ClubNightSession:
         if name in self.player_pool:
             del self.player_pool[name]
         self._rest_queue.remove_player(name)
-        if name in self.resting_players:
-            self.resting_players.remove(name)
-        if name in self.queued_removals:
-            self.queued_removals.remove(name)
+        self.queued_removals.discard(name)

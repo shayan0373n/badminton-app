@@ -13,30 +13,23 @@ from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
 from rating_service import compute_gender_statistics
 from session_logic import ClubNightSession, Player, SessionManager
-from app_types import Gender
+from app_types import Gender, RoundRecord
 
 logger = logging.getLogger("app.session_service")
 
 
-def record_matches_to_database(
-    session: ClubNightSession, winners_by_court: dict[int, tuple[str, ...]]
-) -> None:
-    """
-    Records completed matches to the database for rating updates.
+def _record_round_to_database(session: ClubNightSession, record: RoundRecord) -> int:
+    """Records matches from a single round record to the database.
 
-    Args:
-        session: The active session with current round matches
-        winners_by_court: Mapping of court numbers to winning teams
+    Only records matches with reported winners. Returns the number of matches recorded.
 
     Raises:
         DatabaseError: If match recording fails
     """
-    if not session.current_round_matches or session.database_id is None:
-        return
-
-    for match in session.current_round_matches:
+    recorded = 0
+    for match in record.matches:
         court_num = match.court
-        winner = winners_by_court.get(court_num)
+        winner = record.winners_by_court.get(court_num)
         if not winner:
             continue
 
@@ -60,6 +53,9 @@ def record_matches_to_database(
                 player_2=p2,
                 winner_side=winner_side,
             )
+        recorded += 1
+
+    return recorded
 
 
 def add_player_from_registry(
@@ -210,36 +206,57 @@ def update_weights(
     SessionManager.save(session, session_name)
 
 
-def process_round_completion(
+def advance_to_next_round(session: ClubNightSession, session_name: str) -> None:
+    """Finalizes the current round and generates the next one.
+
+    No database recording — use submit_session_results() for that.
+    Partial results are OK (unreported courts are simply skipped).
+    """
+    session.finalize_round()
+    session.prepare_round()
+    SessionManager.save(session, session_name)
+
+
+def save_court_result(
     session: ClubNightSession,
     session_name: str,
-    winners_by_court: dict[int, tuple[str, ...]],
+    round_idx: int,
+    court_num: int,
+    winner: tuple[str, ...] | None,
 ) -> None:
-    """
-    Orchestrates the completion of a round:
-    1. Records matches to DB (if enabled)
-    2. Finalizes the round (updates scores)
-    3. Prepares the next round (generates matches)
-    4. Persists the session state
-
-    Args:
-        session: The active session
-        session_name: Name of the session (for saving)
-        winners_by_court: Map of court ID to winning team tuple
-
-    Raises:
-        DatabaseError: If recording matches fails.
-    """
-    # 1. Record to database
-    if session.is_recorded and session.database_id is not None:
-        record_matches_to_database(session, winners_by_court)
-
-    # 2. Finalize and prepare next round
-    session.finalize_round(winners_by_court)
-    session.prepare_round()
-
-    # 3. Save to disk
+    """Saves a single court result and recomputes standings."""
+    session.set_court_result(round_idx, court_num, winner)
+    session.recompute_earned_ratings()
     SessionManager.save(session, session_name)
+
+
+def submit_session_results(
+    session: ClubNightSession, session_name: str
+) -> tuple[int, int]:
+    """Uploads all session match results to the database (idempotent).
+
+    Deletes any previously uploaded matches for this session, then re-inserts
+    all matches that have reported winners.
+
+    Note: The delete + re-insert is not atomic. A failure midway through
+    re-insertion may leave fewer matches than before. Re-submitting fixes this.
+
+    Returns:
+        Tuple of (matches_recorded, unreported_courts).
+    """
+    if not session.is_recorded or session.database_id is None:
+        return 0, 0
+
+    MatchDB.delete_by_session(session.database_id)
+
+    total_recorded = 0
+    total_unreported = 0
+    for record in session.round_history:
+        total_recorded += _record_round_to_database(session, record)
+        total_unreported += len(record.matches) - len(record.winners_by_court)
+
+    SessionManager.save(session, session_name)
+    return total_recorded, total_unreported
 
 
 def create_new_session(

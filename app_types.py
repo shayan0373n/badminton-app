@@ -118,3 +118,21 @@ class OptimizerResult:
 
     def __post_init__(self) -> None:
         self.success = self.matches is not None
+
+
+@dataclass
+class RoundRecord:
+    """Record of a single round in session history.
+
+    Attributes:
+        round_num: 1-indexed round number
+        matches: List of match assignments for this round
+        resting_players: Set of players resting this round
+        winners_by_court: Mapping of court number to winning team tuple.
+            Missing keys = unreported courts.
+    """
+
+    round_num: int
+    matches: MatchList
+    resting_players: set[PlayerName]
+    winners_by_court: dict[int, tuple[str, ...]] = field(default_factory=dict)

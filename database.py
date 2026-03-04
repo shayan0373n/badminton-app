@@ -296,3 +296,20 @@ class MatchDB:
             raise DatabaseError("Failed to fetch matches from database") from e
 
         return response.data if response.data else []
+
+    @staticmethod
+    def delete_by_session(session_id: int) -> None:
+        """Deletes all matches for a given session.
+
+        Args:
+            session_id: The session whose matches should be deleted
+
+        Raises:
+            DatabaseError: If the deletion fails
+        """
+        try:
+            supabase = get_supabase_client()
+            supabase.table("matches").delete().eq("session_id", session_id).execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: delete_by_session")
+            raise DatabaseError("Failed to delete matches from database") from e

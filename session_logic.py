@@ -371,6 +371,7 @@ class ClubNightSession:
         self._round_active = True
         self.court_history = result.court_history
         self._rest_queue.rotate_after_round(resting)
+        self.recompute_earned_ratings()
 
     def finalize_round(self) -> None:
         """Finalizes the current round: recomputes ratings and processes removals.

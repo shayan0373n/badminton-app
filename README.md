@@ -14,6 +14,8 @@ A Streamlit-based application for organizing badminton club night sessions with 
 - **Player Registry**: Persistent player database with customizable prior skill estimates
 - **Organic Gender Balancing**: Uses Z-score normalized tier ratings so top females group with top males naturally, without hard-coded penalties
 
+> **[Mathematical Foundations](docs/math.md)** — Detailed write-up of the Bayesian rating model, ILP formulation, and constraint programming backend.
+
 ## Tech Stack
 
 - **Frontend**: Streamlit

@@ -40,16 +40,29 @@ class PlayerDB:
         Raises:
             DatabaseError: If the query fails.
         """
+        all_data = []
+        page_size = 1000
+        start = 0
 
         try:
             supabase = get_supabase_client()
-            response = supabase.table("players").select("*").execute()
+            while True:
+                response = (
+                    supabase.table("players")
+                    .select("*")
+                    .range(start, start + page_size - 1)
+                    .execute()
+                )
+                all_data.extend(response.data)
+                if len(response.data) < page_size:
+                    break
+                start += page_size
         except Exception as e:
             logger.exception("Supabase API call failed: get_all_players")
             raise DatabaseError("Failed to fetch players from database") from e
 
         players: dict[str, Player] = {}
-        for row in response.data:
+        for row in all_data:
             players[row["name"]] = Player(
                 name=row["name"],
                 gender=Gender(row["gender"]),
@@ -209,16 +222,29 @@ class SessionDB:
         Raises:
             DatabaseError: If the query fails.
         """
+        all_sessions = []
+        page_size = 1000
+        start = 0
+
         try:
             supabase = get_supabase_client()
-            response = (
-                supabase.table("sessions").select("*").order("created_at").execute()
-            )
+            while True:
+                response = (
+                    supabase.table("sessions")
+                    .select("*")
+                    .order("created_at")
+                    .range(start, start + page_size - 1)
+                    .execute()
+                )
+                all_sessions.extend(response.data)
+                if len(response.data) < page_size:
+                    break
+                start += page_size
         except Exception as e:
             logger.exception("Supabase API call failed: get_all_sessions")
             raise DatabaseError("Failed to fetch sessions from database") from e
 
-        return response.data if response.data else []
+        return all_sessions
 
 
 class MatchDB:
@@ -282,17 +308,27 @@ class MatchDB:
         Raises:
             DatabaseError: If the query fails.
         """
+        all_matches = []
+        page_size = 1000
+        start = 0
+
         try:
             supabase = get_supabase_client()
-            response = (
-                supabase.table("matches")
-                .select("*")
-                .order("session_id")
-                .order("id")
-                .execute()
-            )
+            while True:
+                response = (
+                    supabase.table("matches")
+                    .select("*")
+                    .order("session_id")
+                    .order("id")
+                    .range(start, start + page_size - 1)
+                    .execute()
+                )
+                all_matches.extend(response.data)
+                if len(response.data) < page_size:
+                    break
+                start += page_size
         except Exception as e:
             logger.exception("Supabase API call failed: get_all_matches")
             raise DatabaseError("Failed to fetch matches from database") from e
 
-        return response.data if response.data else []
+        return all_matches

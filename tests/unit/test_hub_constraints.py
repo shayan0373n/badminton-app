@@ -1,6 +1,6 @@
 import pytest
 from app_types import Gender, OptimizerResult
-from constants import SOLVER_BACKEND
+from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
 else:
@@ -32,6 +32,7 @@ def test_hub_scenario_feasibility():
         players_to_rest=set(),
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         required_partners=required_partners,
         is_doubles=True,
     )
@@ -89,6 +90,7 @@ def test_hub_forced_rest_feasibility():
         players_to_rest={"P1"},  # P1 is forced to rest
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         required_partners=required_partners,
         is_doubles=True,
     )
@@ -123,6 +125,7 @@ def test_triangle_scenario():
         players_to_rest=set(),
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         required_partners=required_partners,
         is_doubles=True,
     )

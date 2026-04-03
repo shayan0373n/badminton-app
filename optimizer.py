@@ -45,7 +45,7 @@ def get_partnership_penalty(
     """Calculate the penalty for a pair being partners (teammates).
     Only considers previous times they were partners."""
     partner_count, _ = court_history.get(tuple(sorted(pair)), (0, 0))
-    return float(partner_count * PARTNER_HISTORY_MULTIPLIER)
+    return float((partner_count**2) * PARTNER_HISTORY_MULTIPLIER)
 
 
 def get_same_court_penalty(
@@ -53,7 +53,7 @@ def get_same_court_penalty(
 ) -> float:
     """Calculate the base penalty for a pair sharing a court in any role."""
     partner_count, opponent_count = court_history.get(tuple(sorted(pair)), (0, 0))
-    return float(partner_count + opponent_count)
+    return float((partner_count + opponent_count) ** 2)
 
 
 # ============================================================================
@@ -64,7 +64,7 @@ def generate_singles_round(
     num_courts: int,
     real_skills: RealSkills,
     court_history: CourtHistory,
-    weights: dict[str, float] | None = None,
+    weights: dict[str, float],
     time_limit: float = OPTIMIZER_TIME_LIMIT,
 ) -> OptimizerResult:
     """
@@ -85,9 +85,6 @@ def generate_singles_round(
     Returns:
         OptimizerResult with matches and updated court history
     """
-    if weights is None:
-        weights = {"skill": 1, "power": 1, "pairing": 1}
-
     # Auto-reduce courts if not enough players
     max_courts = len(available_players) // 2
     num_courts = min(num_courts, max_courts)
@@ -216,8 +213,8 @@ def generate_one_round(
     players_to_rest: set[PlayerName],
     num_courts: int,
     court_history: CourtHistory,
+    weights: dict[str, float],
     players_per_court: int = 4,
-    weights: dict[str, float] | None = None,
     is_doubles: bool = True,
     required_partners: RequiredPartners | None = None,
     time_limit: float = OPTIMIZER_TIME_LIMIT,
@@ -251,9 +248,6 @@ def generate_one_round(
     """
     logger.debug("Tier ratings: %s", tier_ratings)
     logger.debug("Real skills: %s", real_skills)
-
-    if weights is None:
-        weights = {"skill": 1, "power": 1, "pairing": 1}
 
     if required_partners is None:
         required_partners = {}

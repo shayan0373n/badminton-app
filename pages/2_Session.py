@@ -428,12 +428,10 @@ def render_submit_results(session: ClubNightSession, session_name: str) -> None:
                 st.error(f"Failed to submit results: {e}")
 
 
-def handle_session_termination(session: ClubNightSession, session_name: str) -> None:
-    """Handles session termination with state preservation."""
-    if not st.button("⚠️ Terminate Session"):
-        return
-
-    # Preserve session state for next session
+def terminate_session(
+    session: ClubNightSession, session_name: str, confirm_key: str | None = None
+) -> None:
+    """Preserves setup state, clears current session, and navigates to setup page."""
     persistent = session.get_persistent_state()
     st.session_state.player_table = persistent["player_pool"]
     st.session_state.player_table_updated = True
@@ -445,12 +443,42 @@ def handle_session_termination(session: ClubNightSession, session_name: str) -> 
     st.session_state.pairing_weight = persistent["weights"]["pairing"]
     st.session_state.is_recorded_persistent = persistent["is_recorded"]
 
-    # Clean up
     SessionManager.clear(session_name)
     st.session_state.pop("session", None)
     st.session_state.pop("current_session_name", None)
-
+    if confirm_key is not None:
+        st.session_state.pop(confirm_key, None)
     st.switch_page(PAGE_SETUP)
+
+
+def handle_session_termination(session: ClubNightSession, session_name: str) -> None:
+    """Handles session termination with state preservation."""
+    confirm_key = "confirm_terminate_unsaved_results"
+
+    if not (session.is_recorded and session.results_dirty):
+        st.session_state.pop(confirm_key, None)
+        if st.button("⚠️ Terminate Session"):
+            terminate_session(session, session_name, confirm_key)
+        return
+
+    if st.session_state.get(confirm_key):
+        st.warning(
+            "Some results have not been submitted to the database. "
+            "Terminating now will discard those unsaved results."
+        )
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("Confirm Terminate", key="confirm_terminate_btn"):
+                terminate_session(session, session_name, confirm_key)
+        with cancel_col:
+            if st.button("Cancel", key="cancel_terminate_btn"):
+                st.session_state.pop(confirm_key, None)
+                st.rerun()
+        return
+
+    if st.button("⚠️ Terminate Session"):
+        st.session_state[confirm_key] = True
+        st.rerun()
 
 
 # =============================================================================

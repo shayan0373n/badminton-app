@@ -24,7 +24,7 @@ PLAYERS_PER_COURT_SINGLES = 2
 # "ortools" uses Google OR-Tools CP-SAT solver (free, open source)
 # "gurobi" uses PuLP with Gurobi solver (requires commercial license)
 # Use environment variable 'SOLVER' to override the default backend.
-SOLVER_BACKEND = os.getenv("SOLVER", "gurobi").lower()
+SOLVER_BACKEND = os.getenv("SOLVER", "ortools").lower()
 
 # =============================================================================
 # Optimizer Constants

@@ -1,7 +1,7 @@
 import pytest
 from collections import Counter
 from itertools import combinations
-from constants import SOLVER_BACKEND
+from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
@@ -39,6 +39,7 @@ def test_skill_grouping_quality():
         players_to_rest=set(),
         num_courts=2,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True
     )
     
@@ -66,6 +67,7 @@ def test_team_fairness_within_court():
         players_to_rest=set(),
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True
     )
     

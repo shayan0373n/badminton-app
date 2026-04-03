@@ -2,7 +2,7 @@ import random
 from typing import Generator
 
 from app_types import Gender, OptimizerResult, RequiredPartners, TierRatings, RealSkills
-from constants import SOLVER_BACKEND
+from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
 else:
@@ -92,6 +92,7 @@ def run_optimizer_rounds(
             players_to_rest=players_to_rest,
             num_courts=active_courts,
             court_history=court_history,
+            weights=DEFAULT_WEIGHTS,
             is_doubles=True,
             required_partners=required_partners,
         )

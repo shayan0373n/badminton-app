@@ -1,5 +1,5 @@
 import pytest
-from constants import SOLVER_BACKEND
+from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
 else:
@@ -29,6 +29,7 @@ def test_more_player_than_courts_with_no_rest():
         players_to_rest=set(),
         num_courts=num_courts,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
     assert result.success is True
@@ -50,6 +51,7 @@ def test_generate_one_round_doubles(sample_players, sample_gender_stats):
         players_to_rest=set(),
         num_courts=num_courts,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -81,6 +83,7 @@ def test_generate_one_round_singles(sample_players, sample_gender_stats):
         num_courts=num_courts,
         court_history={},
         players_per_court=2,
+        weights=DEFAULT_WEIGHTS,
         is_doubles=False,
     )
 
@@ -110,6 +113,7 @@ def test_optimizer_insufficient_players(sample_players, sample_gender_stats):
         players_to_rest=set(list(tier_ratings.keys())) - set(available_players),
         num_courts=num_courts,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -210,6 +214,7 @@ def test_singles_exact_players_for_one_court():
         num_courts=1,
         court_history={},
         players_per_court=2,
+        weights=DEFAULT_WEIGHTS,
         is_doubles=False,
     )
 
@@ -234,6 +239,7 @@ def test_singles_multiple_courts():
         num_courts=2,
         court_history={},
         players_per_court=2,
+        weights=DEFAULT_WEIGHTS,
         is_doubles=False,
     )
 
@@ -262,6 +268,7 @@ def test_singles_insufficient_players():
         num_courts=1,
         court_history={},
         players_per_court=2,
+        weights=DEFAULT_WEIGHTS,
         is_doubles=False,
     )
 
@@ -288,6 +295,7 @@ def test_doubles_exact_players_for_one_court():
         players_to_rest=set(),
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -311,6 +319,7 @@ def test_doubles_exact_players_for_two_courts():
         players_to_rest=set(),
         num_courts=2,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -342,6 +351,7 @@ def test_doubles_more_courts_than_players_allow():
         players_to_rest={"P5"},
         num_courts=3,  # Request 3 but only 4 players = 1 court possible
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -368,6 +378,7 @@ def test_all_players_resting():
         players_to_rest={"P1", "P2", "P3", "P4"},  # Everyone resting
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -389,6 +400,7 @@ def test_zero_courts():
         players_to_rest=set(),
         num_courts=0,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -406,6 +418,7 @@ def test_empty_player_pool():
         players_to_rest=set(),
         num_courts=1,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 
@@ -427,6 +440,7 @@ def test_no_duplicate_players_across_matches():
         players_to_rest=set(),
         num_courts=3,
         court_history={},
+        weights=DEFAULT_WEIGHTS,
         is_doubles=True,
     )
 

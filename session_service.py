@@ -255,6 +255,7 @@ def submit_session_results(
         total_recorded += _record_round_to_database(session, record)
         total_unreported += len(record.matches) - len(record.winners_by_court)
 
+    session.results_dirty = False
     SessionManager.save(session, session_name)
     return total_recorded, total_unreported
 

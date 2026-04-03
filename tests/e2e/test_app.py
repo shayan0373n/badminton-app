@@ -1,6 +1,7 @@
 from streamlit.testing.v1 import AppTest
 import pytest
 import os
+from constants import DEFAULT_WEIGHTS
 from session_logic import ClubNightSession
 
 
@@ -19,7 +20,7 @@ def test_session_page_smoke(sample_players, sample_gender_stats):
     at = AppTest.from_file(os.path.abspath("pages/2_Session.py"))
 
     at.session_state.session = ClubNightSession(
-        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, is_doubles=True
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
     )
     at.session_state.current_session_name = "Test Session"
 

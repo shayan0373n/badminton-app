@@ -238,7 +238,7 @@ class ClubNightSession:
         players: dict[str, Player],
         num_courts: int,
         gender_stats: GenderStats,
-        weights: dict[str, float] | None = None,
+        weights: dict[str, float],
         is_doubles: bool = True,
         database_id: int | None = None,
         is_recorded: bool = True,
@@ -256,17 +256,14 @@ class ClubNightSession:
         # State required for the optimizer
         # CourtHistory values are (partner_count, opponent_count)
         self.court_history: CourtHistory = defaultdict(_default_court_history_value)
-        self.weights = (
-            weights
-            if weights is not None
-            else {"skill": 1.0, "power": 1.0, "pairing": 1.0}
-        )
+        self.weights = weights
 
         # Session flow state
         self.round_history: list[RoundRecord] = []
         self._round_active: bool = False
         self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
         self.queued_removals: set[PlayerName] = set()  # Players marked for removal
+        self.results_dirty: bool = False
 
     # -------------------------------------------------------------------------
     # Properties (derived from round_history)
@@ -354,6 +351,7 @@ class ClubNightSession:
             num_courts=active_courts,
             court_history=self.court_history,
             players_per_court=self.players_per_court,
+            weights=self.weights,
             is_doubles=self.is_doubles,
             required_partners=required_partners,
         )
@@ -414,10 +412,14 @@ class ClubNightSession:
             raise SessionError(f"Invalid round index: {round_idx}")
 
         record = self.round_history[round_idx]
+        previous_winner = record.winners_by_court.get(court_num)
         if winner is None:
             record.winners_by_court.pop(court_num, None)
         else:
             record.winners_by_court[court_num] = winner
+
+        if previous_winner != winner:
+            self.results_dirty = True
 
     def recompute_earned_ratings(self) -> None:
         """Recomputes all earned_ratings from round_history.

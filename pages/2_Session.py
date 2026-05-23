@@ -98,6 +98,56 @@ def render_round_matches(
                     )
 
 
+def render_unentered_games(
+    session: ClubNightSession,
+    session_name: str,
+    view_idx: int,
+    locked_pairs_set: set[tuple[str, str]],
+) -> None:
+    """Renders unentered games from rounds other than the currently viewed round.
+
+    Args:
+        session: The active club night session
+        session_name: Session name for persistence
+        view_idx: Index of the currently viewed round (0-based)
+        locked_pairs_set: Set of player name tuples representing locked teammate pairs
+    """
+    unentered = []
+    for r_idx, r_record in reversed(list(enumerate(session.round_history))):
+        if r_idx == view_idx:
+            continue
+        for match in r_record.matches:
+            if match.court not in r_record.winners_by_court or r_record.winners_by_court[match.court] is None:
+                unentered.append((r_idx, r_record, match))
+
+    if not unentered:
+        return
+
+    st.markdown("---")
+    st.subheader("⏳ Unentered Games")
+
+    for r_idx, r_record, match in unentered:
+        with st.container(border=True):
+            cols = st.columns([1, 3], vertical_alignment="center")
+            with cols[0]:
+                st.markdown(f"**Round {r_record.round_num} - Court {match.court}**")
+            with cols[1]:
+                stored = r_record.winners_by_court.get(match.court)
+                if session.is_doubles:
+                    selected = _render_doubles_match(
+                        match, locked_pairs_set, r_record.round_num, stored
+                    )
+                else:
+                    selected = _render_singles_match(match, r_record.round_num, stored)
+
+                # Auto-save on change
+                if selected != stored:
+                    session_service.save_court_result(
+                        session, session_name, r_idx, match.court, selected
+                    )
+                    st.rerun()
+
+
 def _render_singles_match(
     match: SinglesMatch,
     round_num: int,
@@ -574,6 +624,11 @@ with col_matches:
         # Render matches with auto-save
         render_round_matches(
             session, session_name, record, view_idx, locked_pairs_set
+        )
+
+        # Render unentered games from other rounds at the bottom of the page
+        render_unentered_games(
+            session, session_name, view_idx, locked_pairs_set
         )
 
 # Right column: Standings

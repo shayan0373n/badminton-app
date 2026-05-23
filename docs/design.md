@@ -180,6 +180,7 @@ pytest
    - Select winners per court (auto-saved on change via `session_service.save_court_result()`)
    - "Next ▶" on latest round → calls `session_service.advance_to_next_round()` (partial results OK)
    - "Submit Results" in sidebar → calls `session_service.submit_session_results()` (idempotent: deletes + re-inserts all matches for the session)
+   - Unentered games from other rounds are displayed at the bottom of the page in chronological order, allowing quick result entry without navigating away.
 
 3. **Rating Recalculation** (`recalculate_ratings.py`)
    - Standalone script, run manually

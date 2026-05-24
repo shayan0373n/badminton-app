@@ -89,9 +89,9 @@ TTT_BETA = 4.0  # Performance noise std dev per game
 # Gamma governs how much true skill can wander over time:
 #   drift_per_season = sqrt(num_days) * gamma
 # With weekly matches over 6 months (182 days):
-#   sqrt(182) * 0.13 = 1.75 mu ≈ 0.5 levels (1 level = 3.5 mu)
-# Previous value 0.55 allowed ~2.1 levels of drift per season.
-TTT_GAMMA = 0.13  # Skill drift per day (std dev of random walk per time unit)
+#   sqrt(182) * 0.25 = 3.375 mu ≈ 1 level (1 level = 3.5 mu)
+# Previous value 0.13 allowed ~0.5 levels of drift per season.
+TTT_GAMMA = 0.25  # Skill drift per day (std dev of random walk per time unit)
 
 # Session performance feedback: amount of mu added per (wins - losses) for
 # matchmaking within a session. +0.5 mu per win, -0.5 mu per loss; rest is

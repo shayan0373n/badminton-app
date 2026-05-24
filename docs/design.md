@@ -94,8 +94,9 @@ Orchestrates a club night session:
 - Holds the player table, `round_history: list[RoundRecord]`, court history
 - `round_num`, `current_round_matches`, `resting_players` are `@property` accessors derived from `round_history[-1]`
 - Delegates match generation to the optimizer
-- Methods: `prepare_round()`, `finalize_round()`, `set_court_result()`, `recompute_earned_ratings()`, `add_player()`, `remove_player()`
-- `add_player()` retroactively adds the new player to `resting_players` for all past rounds, then recomputes earned ratings (catch-up via rest bonus)
+- Methods: `prepare_round()`, `finalize_round()`, `set_court_result()`, `wins()`, `matches_played()`, `get_standings()`, `add_player()`, `remove_player()`
+- `get_standings()` returns `(name, matches, wins, ratio)` derived from `round_history`, sorted by ratio desc then wins desc
+- `add_player()` adds the new player at the back of the rest queue with no past-round bookkeeping; their session stats start at 0/0
 
 ### `SessionManager` (session_logic.py)
 Static class for session file persistence (pickle to `sessions/` directory):

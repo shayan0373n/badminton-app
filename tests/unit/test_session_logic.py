@@ -152,11 +152,13 @@ def test_finalize_round(sample_players, sample_gender_stats):
     _set_winners(session, {1: match.team_1})
     session.finalize_round()
 
-    # Check that winners got points (default 1.0 for winning)
+    # Winners have 1 win / 1 match; losers have 0 wins / 1 match.
     for name in match.team_1:
-        assert session.player_pool[name].earned_rating == 1.0
+        assert session.wins(name) == 1
+        assert session.matches_played(name) == 1
     for name in match.team_2:
-        assert session.player_pool[name].earned_rating == 0.0
+        assert session.wins(name) == 0
+        assert session.matches_played(name) == 1
 
 
 def test_set_court_result_marks_results_dirty(sample_players, sample_gender_stats):
@@ -249,8 +251,8 @@ def test_round_history_populated(sample_players, sample_gender_stats):
         assert record.round_num == i + 1
 
 
-def test_set_court_result_and_recompute(sample_players, sample_gender_stats):
-    """Editing a past result and recomputing should update earned ratings."""
+def test_set_court_result_updates_standings(sample_players, sample_gender_stats):
+    """Editing a past result should be reflected immediately in derived standings."""
     session = ClubNightSession(
         players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
     )
@@ -259,27 +261,22 @@ def test_set_court_result_and_recompute(sample_players, sample_gender_stats):
     match = session.current_round_matches[0]
     team_1, team_2 = match.team_1, match.team_2
 
-    # Set team_1 as winner and finalize
     _set_winners(session, {1: team_1})
     session.finalize_round()
 
-    # Verify initial ratings
     for name in team_1:
-        assert session.player_pool[name].earned_rating == 1.0
-
-    # Edit past result: change winner to team_2
-    session.set_court_result(0, 1, team_2)
-    session.recompute_earned_ratings()
-
-    # team_2 should now have the win
+        assert session.wins(name) == 1
     for name in team_2:
-        assert session.player_pool[name].earned_rating == 1.0
+        assert session.wins(name) == 0
+
+    # Edit past result: change winner to team_2. No recompute call needed --
+    # standings derive from round_history on read.
+    session.set_court_result(0, 1, team_2)
+
+    for name in team_2:
+        assert session.wins(name) == 1
     for name in team_1:
-        # team_1 may have rest bonus if they were resting, otherwise 0
-        if name in session.round_history[0].resting_players:
-            assert session.player_pool[name].earned_rating == 0.5
-        else:
-            assert session.player_pool[name].earned_rating == 0.0
+        assert session.wins(name) == 0
 
 
 def test_advance_with_partial_results(sample_players, sample_gender_stats):
@@ -304,66 +301,13 @@ def test_advance_with_partial_results(sample_players, sample_gender_stats):
     assert session.round_num == 2
 
 
-def test_recompute_earned_ratings(sample_players, sample_gender_stats):
-    """Recompute should produce the same totals as finalize-only awards."""
-    session = ClubNightSession(
-        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
-    )
-
-    # Play 3 rounds
-    for _ in range(3):
-        session.prepare_round()
-        match = session.current_round_matches[0]
-        _set_winners(session, {1: match.team_1})
-        session.finalize_round()
-
-    # Snapshot earned ratings
-    expected = {name: p.earned_rating for name, p in session.player_pool.items()}
-
-    # Recompute and verify same result
-    session.recompute_earned_ratings()
-    for name, p in session.player_pool.items():
-        assert p.earned_rating == expected[name], f"{name}: {p.earned_rating} != {expected[name]}"
-
-
-def test_autosave_then_finalize_no_double_counting(sample_players, sample_gender_stats):
-    """Auto-save (recompute) followed by finalize should not double-count ratings.
-
-    This tests the actual app flow: the UI calls set_court_result + recompute
-    on every winner selection, then advance_to_next_round calls finalize_round.
-    """
-    session = ClubNightSession(
-        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
-    )
-
-    session.prepare_round()
-    match = session.current_round_matches[0]
-    team_1, team_2 = match.team_1, match.team_2
-
-    # Simulate auto-save: set result then recompute (like save_court_result does)
-    session.set_court_result(0, match.court, team_1)
-    session.recompute_earned_ratings()
-
-    # Snapshot after auto-save — these are the correct values
-    expected = {name: p.earned_rating for name, p in session.player_pool.items()}
-
-    # Now finalize (like advance_to_next_round does)
-    session.finalize_round()
-
-    # Ratings should be unchanged — no double-counting
-    for name, p in session.player_pool.items():
-        assert p.earned_rating == expected[name], (
-            f"{name}: {p.earned_rating} after finalize != {expected[name]} after auto-save"
-        )
-
-
 # =============================================================================
 # Mid-Session Player Management
 # =============================================================================
 
 
 def test_add_player_mid_session(sample_players, sample_gender_stats):
-    """Adding player mid-session should give them retroactive rest points."""
+    """Adding a player mid-session should put them in the pool with 0 stats and not touch past rounds."""
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,
@@ -372,47 +316,142 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
         is_doubles=True,
     )
 
-    # Play a round to accumulate some ratings
     session.prepare_round()
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
     session.finalize_round()
 
-    # Add new player
     success = session.add_player(name="NewPlayer", gender=Gender.MALE)
     assert success is True
     assert "NewPlayer" in session.player_pool
 
-    # New player should be in resting_players of round 1 (retroactive)
-    assert "NewPlayer" in session.round_history[0].resting_players
+    # Past round must not be mutated by the join (the bug this guards against).
+    assert "NewPlayer" not in session.round_history[0].resting_players
 
-    # New player should have 0.5 earned rating (rested round 1)
-    new_player = session.player_pool["NewPlayer"]
-    assert new_player.earned_rating == 0.5
+    # New player has no match history yet.
+    assert session.wins("NewPlayer") == 0
+    assert session.matches_played("NewPlayer") == 0
 
 
-def test_add_player_retroactive_resting_multiple_rounds(sample_players, sample_gender_stats):
-    """Player joining after N rounds should get 0.5 * N catch-up."""
+def _max_consecutive_rests(round_history, player_name):
+    """Returns the longest run of consecutive rounds in which player_name is marked resting."""
+    longest = current = 0
+    for record in round_history:
+        if player_name in record.resting_players:
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+
+def _build_players(n):
+    """Builds n players with alternating gender and uniform priors."""
+    return {
+        f"P{i}": Player(
+            name=f"P{i}",
+            gender=Gender.MALE if i % 2 else Gender.FEMALE,
+            prior_mu=25.0,
+        )
+        for i in range(1, n + 1)
+    }
+
+
+def _play_round(session):
+    """Prepares one round and records team_1 as the winner on every court."""
+    session.prepare_round()
+    winners = {m.court: m.team_1 for m in session.current_round_matches}
+    _set_winners(session, winners)
+    session.finalize_round()
+
+
+def test_rest_rotation_fair_when_player_joins_mid_session():
+    """No player should ever appear as resting in consecutive rounds when joining mid-session.
+
+    Setup: 13 players x 3 courts (1 rest/round) for 3 rounds, then a 14th player
+    joins (14 players x 3 courts -> 2 rest/round) for 5 more rounds.
+
+    Invariant under test: at every point in this session, rest_count_per_round <
+    play_count_per_round, so the rotation queue can always pick resters from
+    players who didn't rest last round. Therefore the rest history must show
+    each player resting in at most 1 consecutive round. Any apparent streak >= 2
+    in any player's history is a bug in the rest bookkeeping, not a real
+    rotation outcome.
+    """
+    players = _build_players(13)
+    gender_stats = compute_gender_statistics(players)
     session = ClubNightSession(
-        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+        players=players,
+        num_courts=3,
+        gender_stats=gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
     )
 
-    # Play 3 rounds
     for _ in range(3):
-        session.prepare_round()
-        match = session.current_round_matches[0]
-        _set_winners(session, {1: match.team_1})
-        session.finalize_round()
+        _play_round(session)
 
-    # Add new player
-    session.add_player(name="LateJoiner", gender=Gender.FEMALE)
+    session.add_player(name="LateJoiner", gender=Gender.MALE)
 
-    # Should be in resting_players for all 3 past rounds
-    for record in session.round_history:
-        assert "LateJoiner" in record.resting_players
+    for _ in range(5):
+        _play_round(session)
 
-    # Should have 3 * 0.5 = 1.5 earned rating
-    assert session.player_pool["LateJoiner"].earned_rating == 1.5
+    for name in session.player_pool:
+        streak = _max_consecutive_rests(session.round_history, name)
+        assert streak <= 1, (
+            f"{name} is marked resting in {streak} consecutive rounds across the "
+            f"session, but rotation never assigns consecutive rests when "
+            f"rest_count < play_count."
+        )
+
+
+def test_rest_rotation_fair_when_player_leaves_and_rejoins():
+    """No player should appear as resting in consecutive rounds across a leave-and-rejoin cycle.
+
+    Setup: 13 players x 3 courts (1 rest/round). The round 1 rester leaves; play 2
+    rounds with 12 players (0 rest); the same player rejoins; play 5 more rounds.
+
+    Invariant under test: rest_count < play_count holds in every round, so the
+    rotation can always avoid consecutive rests. A player who was absent for
+    rounds 2-3 didn't rest then -- they were gone -- and after rejoining they
+    sit at the back of the queue, so the next rotation-driven rest is many
+    rounds away. The displayed rest history must therefore show <= 1 consecutive
+    rest for every player.
+    """
+    players = _build_players(13)
+    gender_stats = compute_gender_statistics(players)
+    session = ClubNightSession(
+        players=players,
+        num_courts=3,
+        gender_stats=gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
+    )
+
+    session.prepare_round()
+    leaver = next(iter(session.resting_players))
+    winners = {m.court: m.team_1 for m in session.current_round_matches}
+    _set_winners(session, winners)
+    session.finalize_round()
+
+    session.remove_player(leaver)
+    assert leaver not in session.player_pool
+
+    for _ in range(2):
+        _play_round(session)
+
+    session.add_player(name=leaver, gender=Gender.MALE)
+
+    for _ in range(5):
+        _play_round(session)
+
+    for name in session.player_pool:
+        streak = _max_consecutive_rests(session.round_history, name)
+        assert streak <= 1, (
+            f"{name} is marked resting in {streak} consecutive rounds across the "
+            f"session, but rotation never assigns consecutive rests with these "
+            f"pool sizes."
+        )
 
 
 def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
@@ -668,7 +707,7 @@ def test_session_performance_boosts_matchmaking():
 
 
 def test_get_standings_sorted(sample_players, sample_gender_stats):
-    """Standings should be sorted by earned rating descending."""
+    """Standings should be sorted by ratio desc, then wins desc as tiebreaker."""
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,
@@ -677,7 +716,6 @@ def test_get_standings_sorted(sample_players, sample_gender_stats):
         is_doubles=True,
     )
 
-    # Play a round
     session.prepare_round()
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
@@ -685,9 +723,9 @@ def test_get_standings_sorted(sample_players, sample_gender_stats):
 
     standings = session.get_standings()
 
-    # Should be sorted descending
-    ratings = [rating for _, rating in standings]
-    assert ratings == sorted(ratings, reverse=True)
+    # Rows are (name, matches, wins, ratio). Sort key is (ratio, wins) descending.
+    sort_keys = [(ratio, wins) for _, _, wins, ratio in standings]
+    assert sort_keys == sorted(sort_keys, reverse=True)
 
 
 # =============================================================================
@@ -750,7 +788,8 @@ def test_add_player_before_any_rounds(sample_players, sample_gender_stats):
     success = session.add_player(name="EarlyJoiner", gender=Gender.MALE)
     assert success is True
     assert "EarlyJoiner" in session.player_pool
-    assert session.player_pool["EarlyJoiner"].earned_rating == 0.0
+    assert session.wins("EarlyJoiner") == 0
+    assert session.matches_played("EarlyJoiner") == 0
 
 
 def test_readd_removed_player_skips_played_rounds():
@@ -785,8 +824,8 @@ def test_readd_removed_player_skips_played_rounds():
     assert played_player not in session.round_history[0].resting_players
 
 
-def test_recompute_excludes_removed_players(sample_players, sample_gender_stats):
-    """Recompute should not award points to players no longer in the pool."""
+def test_standings_exclude_removed_players(sample_players, sample_gender_stats):
+    """Derived standings should not include players who were removed from the pool."""
     session = ClubNightSession(
         players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
     )
@@ -798,7 +837,7 @@ def test_recompute_excludes_removed_players(sample_players, sample_gender_stats)
     _set_winners(session, {1: match.team_1})
     session.finalize_round()
 
-    assert session.player_pool[winner_name].earned_rating == 1.0
+    assert session.wins(winner_name) == 1
 
     # After finalize, round is no longer active — removal is immediate
     success, status = session.remove_player(winner_name)
@@ -806,8 +845,6 @@ def test_recompute_excludes_removed_players(sample_players, sample_gender_stats)
     assert status == "immediate"
     assert winner_name not in session.player_pool
 
-    # Recompute should not crash or award points to the removed player
-    session.recompute_earned_ratings()
-
-    for p in session.player_pool.values():
-        assert p.earned_rating >= 0.0
+    # Standings (derived from round_history) should silently exclude the removed player.
+    standings_names = [row[0] for row in session.get_standings()]
+    assert winner_name not in standings_names

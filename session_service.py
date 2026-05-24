@@ -224,9 +224,8 @@ def save_court_result(
     court_num: int,
     winner: tuple[str, ...] | None,
 ) -> None:
-    """Saves a single court result and recomputes standings."""
+    """Saves a single court result. Standings derive from round_history on read."""
     session.set_court_result(round_idx, court_num, winner)
-    session.recompute_earned_ratings()
     SessionManager.save(session, session_name)
 
 

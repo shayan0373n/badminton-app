@@ -636,10 +636,13 @@ with col_standings:
     st.header("Current Standings")
     standings_data = session.get_standings()
     if standings_data:
-        df_standings = pd.DataFrame(standings_data, columns=["Player", "Earned Score"])
+        df_standings = pd.DataFrame(
+            standings_data, columns=["Player", "M", "W", "R"]
+        )
+        df_standings["R"] = df_standings["R"].map(lambda r: f"{r:.2f}")
         df_standings.index += 1
     else:
-        df_standings = pd.DataFrame(columns=["Player", "Earned Score"])
+        df_standings = pd.DataFrame(columns=["Player", "M", "W", "R"])
     st.dataframe(df_standings, width="stretch")
 
 # --- Sidebar ---

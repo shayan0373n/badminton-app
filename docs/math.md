@@ -183,7 +183,7 @@ This bounds rest imbalance: each player rests at most $\lceil n / (k \cdot C) \r
                    │
                    ▼
            Session feedback
-        (earned_rating → μ boost)
+        ((wins - losses) → μ boost)
 ```
 
 ---

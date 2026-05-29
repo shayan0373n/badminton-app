@@ -8,9 +8,10 @@ ratings (mu, sigma) in the database.
 """
 
 import logging
-from database import PlayerDB
+from datetime import datetime
+from database import PlayerDB, SessionDB, MatchDB
 from logger import setup_logging
-from ttt_logic import get_ttt_history
+from ttt_logic import get_ttt_history, parse_timestamp
 
 # Configure logging using matching app pattern
 setup_logging(logging.INFO)
@@ -20,6 +21,26 @@ logger = logging.getLogger("app.recalculate_ratings")
 def recalculate_all_ratings() -> None:
     """Rebuild complete TTT history and update all player ratings."""
     logger.info("=== Starting TTT Rating Recalculation ===")
+
+    # Load sessions and matches to display summary stats
+    sessions = SessionDB.get_all_sessions()
+    matches = MatchDB.get_all_matches()
+    session_map = {s["id"]: s for s in sessions}
+    processed_matches = [m for m in matches if m.get("session_id") in session_map]
+    unique_sessions = {m["session_id"] for m in processed_matches if m.get("session_id") is not None}
+
+    session_dates = []
+    for s_id in unique_sessions:
+        session = session_map[s_id]
+        if "created_at" in session:
+            ts = parse_timestamp(session["created_at"])
+            session_dates.append(datetime.fromtimestamp(ts))
+
+    logger.info(f"Processing {len(processed_matches)} matches across {len(unique_sessions)} unique sessions.")
+    if session_dates:
+        start_date = min(session_dates).strftime("%Y-%m-%d")
+        end_date = max(session_dates).strftime("%Y-%m-%d")
+        logger.info(f"Match date range: {start_date} to {end_date}")
 
     history, learning_curves, players, _ = get_ttt_history()
 

@@ -37,14 +37,14 @@ class PlayerLike(Protocol):
 def compute_gender_statistics(
     players: dict[PlayerName, PlayerLike],
 ) -> GenderStats:
-    """Compute mean and standard deviation of mu for each gender.
+    """Compute trimmed mean and standard deviation of mu for each gender.
 
     Args:
         players: Dict mapping player names to Player objects
 
     Returns:
         Dict mapping Gender to (mean_mu, std_mu, count) tuples.
-        Uses fallback values when insufficient data.
+        Uses 10% trimmed statistics to ignore extreme outliers.
     """
     stats: GenderStats = {}
 
@@ -53,9 +53,19 @@ def compute_gender_statistics(
         count = len(mu_values)
 
         if count >= MIN_PLAYERS_FOR_GENDER_STATS:
-            gender_mean = mean(mu_values)
+            # Sort and trim top 10% and bottom 10%
+            sorted_mus = sorted(mu_values)
+            trim_count = int(count * 0.1)
+            
+            if trim_count > 0:
+                trimmed_mus = sorted_mus[trim_count:-trim_count]
+            else:
+                trimmed_mus = sorted_mus
+                
+            gender_mean = mean(trimmed_mus)
             # stdev requires at least 2 values
-            gender_std = stdev(mu_values) if count >= 2 else FALLBACK_GENDER_STD
+            gender_std = stdev(trimmed_mus) if len(trimmed_mus) >= 2 else FALLBACK_GENDER_STD
+            
             # Guard against zero std (all same rating)
             if gender_std < 0.1:
                 gender_std = FALLBACK_GENDER_STD
@@ -69,39 +79,31 @@ def compute_gender_statistics(
 
 
 def compute_tier_rating(
-    mu: float,
-    gender: Gender,
-    gender_stats: GenderStats,
+    mu: float, player_gender: Gender, stats: GenderStats
 ) -> float:
-    """Compute a player's tier rating using Z-score normalization.
+    """Compute tier rating using Trimmed Constant Shift mapping.
 
     Projects the player's skill onto the male scale for gender-neutral grouping.
-    A top female (high Z-score in female pool) maps to the same tier as a
-    top male (high Z-score in male pool).
+    A top female maps to the same tier as a top male.
 
     Args:
-        mu: Player's raw TTT mu value
-        gender: Player's gender
-        gender_stats: Dict of (mean, std, count) per gender
+        mu: Raw TrueSkill mu value
+        player_gender: Player's gender
+        stats: Dictionary of GenderStats
 
     Returns:
-        Tier rating on optimizer scale (typically 0-5, can extrapolate)
+        Adjusted tier rating on optimizer scale
     """
-    # Get stats for this player's gender
-    g_mean, g_std, _ = gender_stats.get(
-        gender, (FALLBACK_GENDER_MEAN, FALLBACK_GENDER_STD, 0)
-    )
-
-    # Get male stats as projection target
-    m_mean, m_std, _ = gender_stats.get(
-        Gender.MALE, (FALLBACK_GENDER_MEAN, FALLBACK_GENDER_STD, 0)
-    )
-
-    # Compute Z-score relative to own gender
-    z_score = (mu - g_mean) / g_std
-
-    # Project onto male scale
-    tier_mu = m_mean + z_score * m_std
+    if player_gender == Gender.MALE:
+        tier_mu = mu
+    elif player_gender not in stats or Gender.MALE not in stats:
+        tier_mu = mu
+    else:
+        g_mean, _, _ = stats[player_gender]
+        m_mean, _, _ = stats[Gender.MALE]
+        # Trimmed Constant Shift
+        shift = max(0.0, m_mean - g_mean)
+        tier_mu = mu + shift
 
     # Normalize to optimizer scale
     rating_range = TTT_MU_GOOD - TTT_MU_BAD

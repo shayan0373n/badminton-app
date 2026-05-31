@@ -207,3 +207,6 @@ __marimo__/
 
 # Agent configuration
 # .agent/
+
+# Scratch / experiment scripts (not tracked)
+scratch/

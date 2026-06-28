@@ -55,7 +55,7 @@ from player_service import (
 
 # Setup Constants
 DEFAULT_PLAYERS_TABLE = {
-    f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, mu=TTT_DEFAULT_MU)
+    f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=TTT_DEFAULT_MU)
     for i in range(1, 11)
 }
 

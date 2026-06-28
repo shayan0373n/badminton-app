@@ -67,10 +67,15 @@ def get_ttt_history():
         composition.append(teams)
         times.append(session_to_time[session_id])
 
-    priors = {
-        name: TTTPlayer(Gaussian(mu=p.prior_mu, sigma=p.prior_sigma), beta=TTT_BETA, gamma=TTT_GAMMA)
-        for name, p in players.items()
-    }
+    priors = {}
+    for name, p in players.items():
+        if p.prior_mu is None:
+            raise ValueError(
+                f"Player '{name}' has no prior_mu set; a skill prior is required to recalculate ratings."
+            )
+        priors[name] = TTTPlayer(
+            Gaussian(mu=p.prior_mu, sigma=p.prior_sigma), beta=TTT_BETA, gamma=TTT_GAMMA
+        )
 
     history = History(
         composition=composition,

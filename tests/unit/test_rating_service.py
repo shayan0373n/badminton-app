@@ -146,36 +146,36 @@ class TestComputeTierRating:
         expected = (25.0 - TTT_MU_BAD) / (TTT_MU_GOOD - TTT_MU_BAD) * OPTIMIZER_SKILL_RANGE
         assert tier == pytest.approx(expected, rel=0.01)
 
-    def test_tier_rating_preserves_z_score(self):
-        """A player 1 std above their mean should map to 1 std above male mean."""
+    def test_female_shifted_by_constant_mean_gap(self):
+        """A female's mu is shifted onto the male scale by the constant male-female mean gap."""
         gender_stats = {
             Gender.MALE: (25.0, 4.0, 10),
             Gender.FEMALE: (22.0, 3.0, 8),
         }
 
-        # Female at 25 (1 std above female mean of 22)
         tier = compute_tier_rating(25.0, Gender.FEMALE, gender_stats)
 
-        # z-score = (25 - 22) / 3 = 1
-        # tier_mu = 25 + 1 * 4 = 29
-        expected = (29.0 - TTT_MU_BAD) / (TTT_MU_GOOD - TTT_MU_BAD) * OPTIMIZER_SKILL_RANGE
+        # Shift = male_mean - female_mean = 3, applied regardless of spread.
+        # tier_mu = 25 + 3 = 28
+        expected = (28.0 - TTT_MU_BAD) / (TTT_MU_GOOD - TTT_MU_BAD) * OPTIMIZER_SKILL_RANGE
         assert tier == pytest.approx(expected, rel=0.01)
 
-    def test_top_female_equals_top_male_tier(self):
-        """Top female and top male should have same tier if same z-score."""
+    def test_top_female_maps_below_top_male(self):
+        """Under constant shift, a top female maps below a same-z-score top male."""
         gender_stats = {
             Gender.MALE: (25.0, 4.0, 10),
             Gender.FEMALE: (22.0, 3.0, 8),
         }
 
-        # Male at +2 std: mu = 25 + 2*4 = 33
+        # Male at +2 std (33) is unshifted.
         male_tier = compute_tier_rating(33.0, Gender.MALE, gender_stats)
 
-        # Female at +2 std: mu = 22 + 2*3 = 28
+        # Female at +2 std (28) is shifted only by the mean gap (3) -> 31, not up to 33.
         female_tier = compute_tier_rating(28.0, Gender.FEMALE, gender_stats)
 
-        # Both should map to same tier (33.0 normalized)
-        assert male_tier == pytest.approx(female_tier, rel=0.01)
+        expected_female = (31.0 - TTT_MU_BAD) / (TTT_MU_GOOD - TTT_MU_BAD) * OPTIMIZER_SKILL_RANGE
+        assert female_tier == pytest.approx(expected_female, rel=0.01)
+        assert female_tier < male_tier
 
     def test_missing_gender_uses_fallback(self):
         """With only males, females should use fallback stats."""
@@ -278,8 +278,8 @@ class TestPrepareOptimizerRatings:
 
         assert tier_ratings["F1"] > real_skills["F1"]
 
-    def test_top_female_grouped_with_top_male(self):
-        """Top female should have similar tier to top male."""
+    def test_constant_shift_applied_through_pipeline(self):
+        """Females are shifted onto the male scale by the constant mean gap, end-to-end."""
         players = {
             "TopMale": Player(name="TopMale", gender=Gender.MALE, mu=33.0),  # +2 std
             "TopFemale": Player(name="TopFemale", gender=Gender.FEMALE, mu=28.0),  # +2 std
@@ -292,8 +292,8 @@ class TestPrepareOptimizerRatings:
 
         tier_ratings, real_skills = prepare_optimizer_ratings(players, gender_stats)
 
-        # Top female and top male should have same tier (both +2 std)
-        assert tier_ratings["TopFemale"] == pytest.approx(tier_ratings["TopMale"], rel=0.01)
+        # Female shifted by the mean gap (3): 28 -> 31, still below the top male's 33.
+        assert tier_ratings["TopFemale"] < tier_ratings["TopMale"]
 
-        # But real skills should differ (33 vs 28)
+        # Real skills are raw mu, unshifted: 33 > 28.
         assert real_skills["TopMale"] > real_skills["TopFemale"]

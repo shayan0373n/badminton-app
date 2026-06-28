@@ -79,6 +79,8 @@ def add_player_from_registry(
     added = session.add_player(
         name=player.name,
         gender=player.gender,
+        prior_mu=player.prior_mu,
+        prior_sigma=player.prior_sigma,
         mu=player.mu,
         sigma=player.sigma,
         team_name=team_name,
@@ -114,14 +116,17 @@ def add_guest_player(
     guest = Player(
         name=name,
         gender=gender,
-        mu=mu,
+        prior_mu=mu,
         team_name=team_name,
     )
 
     added = session.add_player(
         name=guest.name,
         gender=guest.gender,
+        prior_mu=guest.prior_mu,
+        prior_sigma=guest.prior_sigma,
         mu=guest.mu,
+        sigma=guest.sigma,
         team_name=guest.team_name,
     )
 

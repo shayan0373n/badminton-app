@@ -333,6 +333,52 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     assert session.matches_played("NewPlayer") == 0
 
 
+def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats):
+    """A mid-session player's entered skill must populate prior_mu, the input to rating recalc."""
+    session = ClubNightSession(
+        players=sample_players,
+        num_courts=1,
+        gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
+    )
+
+    success = session.add_player(name="NewPlayer", gender=Gender.MALE, prior_mu=32.0)
+    assert success is True
+
+    player = session.player_pool["NewPlayer"]
+    assert player.prior_mu == 32.0
+    # With no match history, the posterior starts equal to the prior.
+    assert player.mu == 32.0
+
+
+def test_add_player_keeps_distinct_prior_and_posterior(sample_players, sample_gender_stats):
+    """Re-adding a player with a learned posterior keeps mu/sigma distinct from the prior."""
+    session = ClubNightSession(
+        players=sample_players,
+        num_courts=1,
+        gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
+    )
+
+    success = session.add_player(
+        name="Returning",
+        gender=Gender.MALE,
+        prior_mu=28.0,
+        prior_sigma=6.0,
+        mu=31.5,
+        sigma=3.0,
+    )
+    assert success is True
+
+    player = session.player_pool["Returning"]
+    assert player.prior_mu == 28.0
+    assert player.prior_sigma == 6.0
+    assert player.mu == 31.5
+    assert player.sigma == 3.0
+
+
 def _max_consecutive_rests(round_history, player_name):
     """Returns the longest run of consecutive rounds in which player_name is marked resting."""
     longest = current = 0

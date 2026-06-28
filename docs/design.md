@@ -46,7 +46,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 |------|---------|
 | `session_service.py` | Orchestrates session operations (create, advance rounds, save court results, submit results to DB, add/remove players). Bridges UI and domain/database layers. |
 | `player_service.py` | Handles player registry management. Converts between `Player` objects and DataFrames for the UI, and synchronizes changes to the database. |
-| `rating_service.py` | Computes tier ratings (Z-score normalized for court grouping) and real skills (raw normalized for team fairness). Implements organic gender balancing via statistics. |
+| `rating_service.py` | Computes tier ratings (female skill constant-shifted onto the male scale for court grouping) and real skills (raw normalized for team fairness). Implements organic gender balancing via statistics. |
 
 ### Domain Layer
 
@@ -199,9 +199,9 @@ The service layer (`*_service.py`) exists to:
 
 ### Optimizer Contract
 - Uses **decoupled inputs** for different optimization objectives:
-  - `tier_ratings` (Z-score normalized): Used for court grouping (skill spread minimization)
+  - `tier_ratings` (female skill constant-shifted onto male scale): Used for court grouping (skill spread minimization)
   - `real_skills` (raw normalized 0-5): Used for team fairness (power balance)
-- This enables **organic gender balancing**: top females map to same tier as top males
+- This enables **organic gender balancing**: a constant shift aligns the female and male mean skill for grouping
 - Output is `OptimizerResult` with `matches`, `court_history`, `success`
 
 ### Solver Backends

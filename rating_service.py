@@ -3,11 +3,11 @@
 Rating service for computing tier ratings and real skills.
 
 This module implements the "Decoupled Organic Inputs" architecture:
-- Tier Rating: Z-score normalized for court grouping (social hierarchy)
+- Tier Rating: female skill shifted onto the male scale for court grouping (social hierarchy)
 - Real Skill: Direct normalized for team fairness (win probability)
 
-The Z-score approach ensures top females are grouped with top males
-while preserving accurate win probability for team balancing.
+The constant-shift approach aligns the female and male mean skill for court
+grouping, while real skill keeps raw win probability for team balancing.
 """
 
 from statistics import mean, stdev
@@ -83,8 +83,8 @@ def compute_tier_rating(
 ) -> float:
     """Compute tier rating using Trimmed Constant Shift mapping.
 
-    Projects the player's skill onto the male scale for gender-neutral grouping.
-    A top female maps to the same tier as a top male.
+    Projects the player's skill onto the male scale for gender-neutral grouping
+    by shifting females up by the male-female mean gap, aligning the gender means.
 
     Args:
         mu: Raw TrueSkill mu value

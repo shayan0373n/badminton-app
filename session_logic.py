@@ -135,7 +135,7 @@ class Player:
     name: str
     gender: Gender
     # TTT priors (input to TTT - set manually based on perceived skill level)
-    prior_mu: float = TTT_DEFAULT_MU
+    prior_mu: float | None = None
     prior_sigma: float = TTT_DEFAULT_SIGMA
     # TTT posteriors (output from TTT - computed from match history)
     # Default to None so __post_init__ can set them to prior values
@@ -501,8 +501,10 @@ class ClubNightSession:
         self,
         name: str,
         gender: Gender,
-        mu: float = TTT_DEFAULT_MU,
-        sigma: float = TTT_DEFAULT_SIGMA,
+        prior_mu: float = TTT_DEFAULT_MU,
+        prior_sigma: float = TTT_DEFAULT_SIGMA,
+        mu: float | None = None,
+        sigma: float | None = None,
         team_name: str = "",
     ) -> bool:
         """Adds a new player mid-session at the back of the rest queue.
@@ -510,8 +512,10 @@ class ClubNightSession:
         Args:
             name: Player's name (must be unique)
             gender: Gender.MALE ('M') or Gender.FEMALE ('F')
-            mu: TTT mean skill estimate
-            sigma: TTT uncertainty (standard deviation)
+            prior_mu: TTT prior mean (manual skill estimate, input to rating recalc)
+            prior_sigma: TTT prior uncertainty (standard deviation)
+            mu: TTT posterior mean; defaults to prior_mu when None
+            sigma: TTT posterior uncertainty; defaults to prior_sigma when None
             team_name: Optional team name for permanent pairing
 
         Returns:
@@ -523,6 +527,8 @@ class ClubNightSession:
         self.player_pool[name] = Player(
             name=name,
             gender=gender,
+            prior_mu=prior_mu,
+            prior_sigma=prior_sigma,
             mu=mu,
             sigma=sigma,
             team_name=team_name,

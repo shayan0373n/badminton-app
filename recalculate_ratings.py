@@ -9,9 +9,9 @@ ratings (mu, sigma) in the database.
 
 import logging
 from datetime import datetime
-from database import PlayerDB, SessionDB, MatchDB
+from database import PlayerDB, SessionDB, MatchDB, SeasonDB
 from logger import setup_logging
-from ttt_logic import get_ttt_history, parse_timestamp
+from ttt_logic import age_sigma, get_ttt_history, parse_timestamp, to_day_ordinal, today_ordinal
 
 # Configure logging using matching app pattern
 setup_logging(logging.INFO)
@@ -49,16 +49,32 @@ def recalculate_all_ratings() -> None:
         return
 
     logger.info("Updating player ratings...")
-    updated_count = 0
-    for name, curve in learning_curves.items():
-        if name in players:
-            # Get the last estimate (most recent)
-            final_time, final_estimate = curve[-1]
-            players[name].mu = final_estimate.mu
-            players[name].sigma = final_estimate.sigma
-            updated_count += 1
-        else:
+    today_day = today_ordinal()
+
+    current_season = SeasonDB.get_current_season()
+    if current_season is None:
+        raise RuntimeError("No current season found; rating recalculation requires an active season.")
+    season_start_day = to_day_ordinal(current_season["start_date"])
+
+    for name in learning_curves:
+        if name not in players:
             logger.warning(f"  Player '{name}' found in matches but not in database")
+
+    updated_count = 0
+    for name, player in players.items():
+        curve = learning_curves.get(name)
+        if curve:
+            # Played this season: use the last in-season estimate, aged to today.
+            final_day, final_estimate = curve[-1]
+            base_sigma = final_estimate.sigma
+            player.mu = final_estimate.mu
+        else:
+            # No matches this season yet: age the carried-forward prior instead.
+            final_day = season_start_day
+            base_sigma = player.prior_sigma
+
+        player.sigma = age_sigma(base_sigma, today_day - final_day)
+        updated_count += 1
 
     # Save updated ratings to database
     logger.info(f"Saving {updated_count} updated player ratings to database...")
@@ -71,7 +87,7 @@ def recalculate_all_ratings() -> None:
     sorted_players = sorted(players.values(), key=lambda p: p.mu, reverse=True)
     for i, p in enumerate(sorted_players, 1):
         print(
-            f"{i:2}. {p.name:20} mu={p.mu:5.2f}  σ={p.sigma:4.2f}  (conservative={p.conservative_rating:5.2f})"
+            f"{i:2}. {p.name:20} mu={p.mu:5.2f}  sigma={p.sigma:4.2f}  (conservative={p.conservative_rating:5.2f})"
         )
 
     print("\nTip: Run 'python analyze_ratings.py' for detailed improvement analysis and correlation plots.")

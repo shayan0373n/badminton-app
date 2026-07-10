@@ -5,7 +5,6 @@ This module contains all configuration constants used throughout the application
 """
 
 import os
-from datetime import datetime
 
 # =============================================================================
 # Game Mode Constants
@@ -72,19 +71,17 @@ TTT_MU_GOOD = 32.0
 TTT_MU_AVERAGE = 25.0
 TTT_MU_BAD = 18.0
 
-# Uncertainty levels (sigma)
-TTT_SIGMA_CERTAIN = 2.5  # Well-known player
-TTT_SIGMA_UNCERTAIN = 6.0  # New or rarely-seen player
-
 # Default values for new players
 TTT_DEFAULT_MU = TTT_MU_AVERAGE
-TTT_DEFAULT_SIGMA = TTT_SIGMA_UNCERTAIN
+# Sigma (uncertainty) of an unknown player. Also the ceiling age_sigma inflates
+# toward, so no one is ever treated as more uncertain than a never-seen player.
+TTT_DEFAULT_SIGMA = 6.0
 
 # Game dynamics
 # Beta models within-game randomness: a player's performance in a single game
 # is drawn from N(skill, beta²). With beta=4.0 and 1 level = 3.5 mu:
 #   beta/level = 4.0/3.5 ≈ 1.14 — a 1-level gap gives the stronger player
-#   ~76% win probability per rally. Higher beta = more upsets.
+#   ~73% win probability per rally (Φ(3.5/(4·√2))). Higher beta = more upsets.
 TTT_BETA = 4.0  # Performance noise std dev per game
 # Gamma governs how much true skill can wander over time:
 #   drift_per_season = sqrt(num_days) * gamma
@@ -107,11 +104,6 @@ SESSION_PERFORMANCE_FACTOR = 0.5
 FALLBACK_GENDER_MEAN = TTT_MU_AVERAGE  # 25.0
 FALLBACK_GENDER_STD = 4.0
 MIN_PLAYERS_FOR_GENDER_STATS = 3
-
-# =============================================================================
-# Time & Timestamp Constants
-# =============================================================================
-TTT_REFERENCE_DATE = datetime(2026, 1, 1)
 
 # =============================================================================
 # Page Navigation Constants

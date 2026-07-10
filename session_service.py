@@ -117,7 +117,6 @@ def add_guest_player(
         name=name,
         gender=gender,
         prior_mu=mu,
-        team_name=team_name,
     )
 
     added = session.add_player(
@@ -127,7 +126,7 @@ def add_guest_player(
         prior_sigma=guest.prior_sigma,
         mu=guest.mu,
         sigma=guest.sigma,
-        team_name=guest.team_name,
+        team_name=team_name,
     )
 
     if not added:
@@ -271,6 +270,7 @@ def create_new_session(
     session_name: str,
     is_doubles: bool,
     is_recorded: bool = True,
+    teams: dict[str, str] | None = None,
 ) -> ClubNightSession:
     """
     Creates and initializes a new session.
@@ -305,6 +305,7 @@ def create_new_session(
         weights=weights,
         is_doubles=is_doubles,
         is_recorded=is_recorded,
+        teams=teams,
     )
 
     # 4. Prepare First Round

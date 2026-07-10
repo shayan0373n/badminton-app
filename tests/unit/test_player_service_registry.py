@@ -2,16 +2,17 @@
 """
 Unit tests for player registry utilities in player_service.
 
-Tests the contract of dataframe_to_players: all DataFrame columns
-should be correctly converted to their corresponding Player attributes.
+Tests the contract of dataframe_to_players (grid columns are correctly
+converted to Player attributes; fields the grid does not expose are
+preserved) and of sync_registry_to_database (deletion detection).
 """
 
 import pandas as pd
-import pytest
 
+import player_service
 from app_types import Gender
-from constants import TTT_DEFAULT_MU, TTT_DEFAULT_SIGMA
 from player_service import dataframe_to_players
+from session_logic import Player
 
 
 def test_dataframe_to_players_produces_correct_player_attributes():
@@ -27,7 +28,6 @@ def test_dataframe_to_players_produces_correct_player_attributes():
             "Mu": [27.5],
             "Sigma": [5.0],
             "database_id": [42],
-            "Team Name": ["TeamA"],
         }
     )
 
@@ -40,7 +40,6 @@ def test_dataframe_to_players_produces_correct_player_attributes():
     assert player.mu == 27.5
     assert player.sigma == 5.0
     assert player.database_id == 42
-    assert player.team_name == "TeamA"
 
 
 def test_dataframe_to_players_handles_nan_mu_and_sigma():
@@ -56,7 +55,6 @@ def test_dataframe_to_players_handles_nan_mu_and_sigma():
             "Mu": [None],
             "Sigma": [None],
             "database_id": [None],
-            "Team Name": [""],
         }
     )
 
@@ -70,4 +68,101 @@ def test_dataframe_to_players_handles_nan_mu_and_sigma():
     assert player.mu == player.prior_mu
     assert player.sigma == player.prior_sigma
     assert player.database_id is None
-    assert player.team_name == ""
+
+
+def _registry_row(
+    name="Alice",
+    gender=Gender.FEMALE,
+    prior_mu=25.0,
+    mu=27.5,
+    sigma=5.0,
+    database_id=42,
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Player Name": [name],
+            "Gender": [gender],
+            "Prior Mu": [prior_mu],
+            "Mu": [mu],
+            "Sigma": [sigma],
+            "database_id": [database_id],
+        }
+    )
+
+
+def test_dataframe_to_players_preserves_unexposed_fields():
+    """
+    Fields the grid does not expose (e.g. prior_sigma) must survive a save:
+    edited rows are applied onto the existing Player matched by database_id.
+    The existing registry object itself must not be mutated.
+    """
+    existing = {
+        "Alice": Player(
+            name="Alice",
+            gender=Gender.FEMALE,
+            prior_mu=25.0,
+            prior_sigma=6.0,
+            mu=27.5,
+            sigma=5.0,
+            database_id=42,
+        )
+    }
+
+    result = dataframe_to_players(
+        _registry_row(prior_mu=26.0), existing_registry=existing
+    )
+    player = result["Alice"]
+
+    assert player.prior_mu == 26.0  # edited in the grid
+    assert player.prior_sigma == 6.0  # not in the grid: preserved
+    assert existing["Alice"].prior_mu == 25.0  # source object untouched
+
+
+def test_dataframe_to_players_rename_keeps_identity():
+    """A rename with the same database_id keeps the player's unexposed fields."""
+    existing = {
+        "Alice": Player(
+            name="Alice",
+            gender=Gender.FEMALE,
+            prior_mu=25.0,
+            prior_sigma=6.0,
+            database_id=42,
+        )
+    }
+
+    result = dataframe_to_players(
+        _registry_row(name="Alicia"), existing_registry=existing
+    )
+
+    assert "Alice" not in result
+    assert result["Alicia"].database_id == 42
+    assert result["Alicia"].prior_sigma == 6.0
+
+
+def test_sync_registry_deletes_removed_players(monkeypatch):
+    """Players whose database_id disappears from the registry are deleted;
+    the remaining registry is upserted. New players (no id) are never deleted."""
+    deleted: list[int] = []
+    upserted: dict[str, Player] = {}
+    monkeypatch.setattr(
+        player_service.PlayerDB,
+        "delete_players_by_ids",
+        lambda ids: deleted.extend(ids),
+    )
+    monkeypatch.setattr(
+        player_service.PlayerDB,
+        "upsert_players",
+        lambda registry: upserted.update(registry),
+    )
+
+    alice = Player(name="Alice", gender=Gender.FEMALE, prior_mu=25.0, database_id=1)
+    bob = Player(name="Bob", gender=Gender.MALE, prior_mu=25.0, database_id=2)
+    newbie = Player(name="Newbie", gender=Gender.MALE, prior_mu=25.0)
+
+    player_service.sync_registry_to_database(
+        old_registry={"Alice": alice, "Bob": bob},
+        new_registry={"Alice": alice, "Newbie": newbie},
+    )
+
+    assert deleted == [2]
+    assert set(upserted) == {"Alice", "Newbie"}

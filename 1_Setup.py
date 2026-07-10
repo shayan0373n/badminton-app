@@ -40,7 +40,6 @@ from constants import (
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     TTT_DEFAULT_MU,
-    TTT_DEFAULT_SIGMA,
 )
 from database import PlayerDB, SessionDB
 from session_logic import ClubNightSession, SessionManager, Player
@@ -49,7 +48,6 @@ import session_service
 import player_service
 from player_service import (
     create_registry_dataframe,
-    create_session_setup_dataframe,
     dataframe_to_players,
 )
 
@@ -127,6 +125,7 @@ def start_session(
     session_name: str,
     is_doubles: bool,
     is_recorded: bool = True,
+    teams: dict[str, str] | None = None,
 ) -> None:
     """Creates and starts a new badminton session.
 
@@ -141,6 +140,7 @@ def start_session(
             session_name=session_name,
             is_doubles=is_doubles,
             is_recorded=is_recorded,
+            teams=teams,
         )
     except Exception as e:
         st.error(f"Could not create session in database: {e}")
@@ -278,7 +278,9 @@ with tab2:
 
     if st.button("💾 Save Registry to Cloud", type="secondary"):
         # Process edited DataFrame into Player objects
-        new_registry = dataframe_to_players(edited_reg_df)
+        new_registry = dataframe_to_players(
+            edited_reg_df, existing_registry=st.session_state.master_registry
+        )
 
         try:
             player_service.sync_registry_to_database(
@@ -315,6 +317,7 @@ with tab1:
         }
 
         # If Doubles, allow setting temporary team names for this session
+        session_teams: dict[str, str] = {}
         if st.session_state.get("is_doubles_persistent", DEFAULT_IS_DOUBLES):
             st.write("### (Optional) Pair Fixed Teams")
             st.caption(
@@ -323,7 +326,6 @@ with tab1:
             )
 
             # Simple editor for team names only for selected players
-            player_ranks = range(1, len(session_players) + 1)
             temp_team_df = pd.DataFrame(
                 {
                     "Player": [p.name for p in session_players.values()],
@@ -338,31 +340,20 @@ with tab1:
                 key="session_team_editor",
             )
 
-            # Update team names in our temporary session object
             for _, row in edited_teams.iterrows():
-                if row["Player"] in session_players:
-                    session_players[row["Player"]].team_name = row["Team Name"]
+                team = str(row["Team Name"]).strip()
+                if team and row["Player"] in session_players:
+                    session_teams[row["Player"]] = team
 
         # Store in session state for the 'Start' button below
         st.session_state.player_table = session_players
+        st.session_state.session_teams = session_teams
     else:
         st.warning("Select at least one player to start.")
         st.session_state.player_table = {}
+        st.session_state.session_teams = {}
 
 st.divider()
-
-
-# Initialize the editor's DataFrame if it doesn't exist
-if "editor_df" not in st.session_state:
-    # Need to get is_doubles early, use default if not set
-    current_is_doubles = st.session_state.get(
-        "is_doubles_persistent", DEFAULT_IS_DOUBLES
-    )
-    st.session_state.editor_df = create_session_setup_dataframe(
-        st.session_state.player_table, current_is_doubles
-    )
-
-# Note: Confirm button is removed in favor of Tab management
 
 # --- Session Start Logic ---
 st.subheader("2. Start New Session")
@@ -408,13 +399,9 @@ is_doubles = st.toggle(
     help="Enable for 4-player doubles, disable for 2-player singles",
 )
 
-# Detect game mode change and refresh editor
+# Detect game mode change and rerun so the team-pairing section appears/disappears
 if st.session_state.is_doubles_persistent != is_doubles:
     st.session_state.is_doubles_persistent = is_doubles
-    # Refresh the editor dataframe to add/remove Team Name column
-    st.session_state.editor_df = create_session_setup_dataframe(
-        st.session_state.player_table, is_doubles
-    )
     st.rerun()
 
 # Initialize persistent number of courts (survives session resets)
@@ -492,6 +479,7 @@ if st.button("🚀 Start New Session", type="primary"):
             final_session_name,
             is_doubles,
             is_recorded,
+            teams=st.session_state.get("session_teams", {}),
         )
     else:
         # If validation fails, show error

@@ -59,6 +59,83 @@ def test_add_remove_player(sample_players, sample_gender_stats):
     assert "Zoe" in session.player_pool
 
 
+# =============================================================================
+# Session-Scoped Teams (fixed doubles pairing)
+# =============================================================================
+
+
+def _make_teams_session(sample_players, sample_gender_stats, teams):
+    return ClubNightSession(
+        players=sample_players,
+        num_courts=2,
+        gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
+        teams=teams,
+    )
+
+
+def test_required_partners_from_teams(sample_players, sample_gender_stats):
+    """Comma-separated team memberships produce pairwise partner constraints."""
+    session = _make_teams_session(
+        sample_players,
+        sample_gender_stats,
+        teams={
+            "Alice": "A",
+            "Bob": "A",
+            "Charlie": "B, C",  # member of two teams
+            "Dave": "B",
+            "Eve": "C",
+            "Frank": "Solo",  # single-member team: no constraint
+        },
+    )
+
+    required = session.get_required_partners()
+
+    assert required["Alice"] == {"Bob"}
+    assert required["Bob"] == {"Alice"}
+    assert required["Charlie"] == {"Dave", "Eve"}
+    assert required["Dave"] == {"Charlie"}
+    assert required["Eve"] == {"Charlie"}
+    assert "Frank" not in required
+
+
+def test_teams_ignore_players_absent_from_pool(sample_players, sample_gender_stats):
+    """A teams entry for someone not in the player pool creates no constraints."""
+    session = _make_teams_session(
+        sample_players,
+        sample_gender_stats,
+        teams={"Alice": "A", "Ghost": "A"},
+    )
+
+    assert session.get_required_partners() == {}
+
+
+def test_add_player_with_team_joins_partnership(sample_players, sample_gender_stats):
+    """A player added mid-session with a team name is constrained to its members."""
+    session = _make_teams_session(
+        sample_players, sample_gender_stats, teams={"Alice": "A"}
+    )
+
+    session.add_player(name="Zoe", gender=Gender.FEMALE, team_name="A")
+
+    required = session.get_required_partners()
+    assert required["Zoe"] == {"Alice"}
+    assert required["Alice"] == {"Zoe"}
+
+
+def test_remove_player_clears_team_membership(sample_players, sample_gender_stats):
+    """Removing a player drops their team entry and its constraints."""
+    session = _make_teams_session(
+        sample_players, sample_gender_stats, teams={"Alice": "A", "Bob": "A"}
+    )
+
+    session.remove_player("Alice")  # no active round: immediate removal
+
+    assert "Alice" not in session.teams
+    assert session.get_required_partners() == {}
+
+
 def test_prepare_round(sample_players, sample_gender_stats):
     session = ClubNightSession(
         players=sample_players,

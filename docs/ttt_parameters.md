@@ -10,7 +10,7 @@
 | **sigma_certain** | 2.5 | Uncertainty for well-known players |
 | **sigma_uncertain** | 6.0 | Uncertainty for new/rarely-seen players |
 | **beta** | 4.0 | Performance noise std dev per game |
-| **gamma** | 0.13 | Skill drift per day (std dev of true skill random walk) |
+| **gamma** | 0.25 | Skill drift per day (std dev of true skill random walk) |
 
 ## Skill Scale
 
@@ -31,29 +31,31 @@
 
 | Matchup | Win % for stronger team |
 |---------|-------------------------|
-| Good vs Bad (2 levels) | ~100% |
-| Good vs Average (1 level) | ~96% |
-| Average vs Bad (1 level) | ~96% |
+| Good vs Bad (4 levels) | ~100% |
+| Good vs Average (2 levels) | ~96% |
+| Average vs Bad (2 levels) | ~96% |
 
 ### Singles (1v1)
 
 | Matchup | Win % for stronger player |
 |---------|---------------------------|
-| Good vs Bad (2 levels) | ~99% |
-| Good vs Average (1 level) | ~89% |
-| Average vs Bad (1 level) | ~89% |
+| Good vs Bad (4 levels) | ~99% |
+| Good vs Average (2 levels) | ~89% |
+| Average vs Bad (2 levels) | ~89% |
 
 ## Parameter Meanings
 
 - **mu**: Mean skill estimate (higher = better player)
 - **sigma**: Uncertainty in skill estimate (higher = less certain)
-- **beta**: Performance noise per game. With beta=4.0 and 1 level=3.5 mu,
-  beta/level ≈ 1.14 — a 1-level gap gives ~89% singles win probability.
+- **beta**: Performance noise per game. Singles win probability for a skill
+  gap Δμ is Φ(Δμ / (β√2)) (standard normal CDF). With beta=4.0 and
+  1 level=3.5 mu, a 1-level gap gives ~73% and a 2-level gap
+  (e.g. average vs good, 7 mu) gives ~89% singles win probability.
   Higher beta = more upsets.
 - **gamma**: How much true skill can drift per day (std dev of random walk).
   Drift over a period = sqrt(num_days) × gamma.
-  With gamma=0.13 over a 6-month season (182 days):
-  sqrt(182) × 0.13 = 1.75 mu ≈ 0.5 levels of potential skill change.
+  With gamma=0.25 over a 6-month season (182 days):
+  sqrt(182) × 0.25 = 3.375 mu ≈ 1 level of potential skill change.
 
 ## Display Rating
 

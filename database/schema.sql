@@ -6,7 +6,7 @@
 --
 -- Default values for prior_mu and prior_sigma should match constants.py:
 --   TTT_DEFAULT_MU = 25.0 (TTT_MU_AVERAGE)
---   TTT_DEFAULT_SIGMA = 6.0 (TTT_SIGMA_UNCERTAIN)
+--   TTT_DEFAULT_SIGMA = 6.0
 -- =============================================================================
 
 -- players table
@@ -21,6 +21,22 @@ CREATE TABLE IF NOT EXISTS public.players (
   sigma double precision,
   created_at timestamptz DEFAULT now()
 );
+
+-- seasons table
+-- A season is a date window. Sessions belong to a season implicitly via their
+-- created_at timestamp (no season_id FK). The open/current season is the single
+-- row with end_date IS NULL; live ratings process only sessions on or after its
+-- start_date. Closed seasons keep end_date for record-keeping / historical recompute.
+CREATE TABLE IF NOT EXISTS public.seasons (
+  id serial PRIMARY KEY,
+  start_date timestamptz NOT NULL,
+  end_date timestamptz,
+  created_at timestamptz DEFAULT now()
+);
+
+-- At most one open season at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_season
+  ON public.seasons ((end_date IS NULL)) WHERE end_date IS NULL;
 
 -- sessions table
 CREATE TABLE IF NOT EXISTS public.sessions (

@@ -1,14 +1,13 @@
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from trueskillthroughtime import History, Player as TTTPlayer, Gaussian
 from constants import (
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
     TTT_BETA,
     TTT_GAMMA,
-    TTT_REFERENCE_DATE,
 )
-from database import PlayerDB, SessionDB, MatchDB
+from database import PlayerDB, SessionDB, MatchDB, SeasonDB
 
 logger = logging.getLogger("app.ttt_logic")
 
@@ -28,11 +27,48 @@ def parse_timestamp(timestamp_str: str) -> float:
             continue
     raise ValueError(f"Cannot parse timestamp: {timestamp_str}")
 
+
+def to_day_ordinal(timestamp: str) -> int:
+    """Day ordinal (date.toordinal) of a DB ISO timestamp: the TTT time axis.
+
+    TTT works in day units where only differences matter, so the absolute epoch
+    is irrelevant; a session sits on its local calendar date.
+    """
+    return datetime.fromtimestamp(parse_timestamp(timestamp)).date().toordinal()
+
+
+def today_ordinal() -> int:
+    """Today on the same day axis as to_day_ordinal."""
+    return date.today().toordinal()
+
+
+def age_sigma(sigma: float, idle_days: int) -> float:
+    """Inflate a TTT uncertainty forward across idle days via drift.
+
+    Uncertainty grows by the random-walk drift (TTT_GAMMA) per idle day and is
+    capped at TTT_DEFAULT_SIGMA (a never-seen player); aging never shrinks it.
+    """
+    idle_days = max(0, idle_days)
+    aged = (sigma**2 + idle_days * TTT_GAMMA**2) ** 0.5
+    return min(aged, TTT_DEFAULT_SIGMA)
+
+
 def get_ttt_history():
     """Fetch data and run TTT convergence. Returns (history, learning_curves, players, match_counts)."""
     players = PlayerDB.get_all_players()
     sessions = SessionDB.get_all_sessions()
     matches = MatchDB.get_all_matches()
+
+    # Restrict to the current season's window. Before any season exists, all
+    # history is one implicit preseason (no filtering).
+    current_season = SeasonDB.get_current_season()
+    if current_season is not None:
+        season_start = parse_timestamp(current_season["start_date"])
+        sessions = [
+            s for s in sessions if parse_timestamp(s["created_at"]) >= season_start
+        ]
+        in_season = {s["id"] for s in sessions}
+        matches = [m for m in matches if m["session_id"] in in_season]
 
     if not matches:
         return None, {}, players, {}
@@ -40,10 +76,7 @@ def get_ttt_history():
     match_counts = {}
     session_to_time = {}
     for s in sessions:
-        timestamp = parse_timestamp(s["created_at"])
-        dt = datetime.fromtimestamp(timestamp)
-        days_since_ref = (dt.date() - TTT_REFERENCE_DATE.date()).days
-        session_to_time[s["id"]] = days_since_ref
+        session_to_time[s["id"]] = to_day_ordinal(s["created_at"])
 
     composition = []
     times = []

@@ -2,11 +2,11 @@
 trigger: always_on
 ---
 
-# Badminton App - Codebase Structure
+# Badminton App — Architecture & Contracts
 
-This document provides an overview of the codebase architecture and conventions to help understand how things are organized and how to make changes.
+This document records the architecture rules, cross-file contracts, and design rationale that cannot be read directly from the code. File inventories and class field listings are deliberately omitted — module docstrings and the code itself are the source of truth for those.
 
-## Architecture Overview
+## Architecture
 
 The app follows a **layered architecture** with clear separation of concerns:
 
@@ -20,7 +20,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 │   (Orchestrates domain logic + database interactions)    │
 ├─────────────────────────────────────────────────────────┤
 │                    Domain Layer                          │
-│        session_logic.py, optimizer.py, app_types.py      │
+│  session_logic.py, optimizer*.py, app_types.py           │
 │        (Pure business logic, no database calls)          │
 ├─────────────────────────────────────────────────────────┤
 │                  Infrastructure Layer                    │
@@ -29,145 +29,28 @@ The app follows a **layered architecture** with clear separation of concerns:
 └─────────────────────────────────────────────────────────┘
 ```
 
----
+Rules (these are norms for future changes, not just descriptions):
 
-## File-by-File Breakdown
-
-### UI Layer
-
-| File | Purpose |
-|------|---------|
-| `1_Setup.py` | Main entry point. Session setup, player registry editing, session creation. Run with `streamlit run 1_Setup.py`. |
-| `pages/2_Session.py` | Active session management. Match selection, winner recording, player/court management. |
-
-### Service Layer
-
-| File | Purpose |
-|------|---------|
-| `session_service.py` | Orchestrates session operations (create, advance rounds, save court results, submit results to DB, add/remove players). Bridges UI and domain/database layers. |
-| `player_service.py` | Handles player registry management. Converts between `Player` objects and DataFrames for the UI, and synchronizes changes to the database. |
-| `rating_service.py` | Computes tier ratings (female skill constant-shifted onto the male scale for court grouping) and real skills (raw normalized for team fairness). Implements organic gender balancing via statistics. |
-
-### Domain Layer
-
-| File | Purpose |
-|------|---------|
-| `session_logic.py` | Core domain logic. Contains `Player`, `SessionManager`, `RestRotationQueue`, and `ClubNightSession` classes. No DB calls. |
-| `optimizer.py` | Match optimization using PuLP/Gurobi. `generate_one_round()` for doubles, `generate_singles_round()` for singles. |
-| `optimizer_ortools.py` | Alternative optimizer using Google OR-Tools CP-SAT solver. Same public API as `optimizer.py`. Selected via `SOLVER_BACKEND` in `constants.py`. |
-| `app_types.py` | Type aliases and dataclasses (`Gender`, `OptimizerResult`, `SinglesMatch`, `DoublesMatch`, `TierRatings`, `RealSkills`, `GenderStats`, etc.). |
-| `constants.py` | All configuration constants (TrueSkill params, optimizer settings, fallback gender stats, defaults). |
-| `exceptions.py` | Domain exceptions: `DatabaseError`, `SessionError`, `OptimizerError`, `ValidationError`. |
-
-### Infrastructure Layer
-
-| File | Purpose |
-|------|---------|
-| `database.py` | Supabase database operations. Classes: `PlayerDB`, `SessionDB`, `MatchDB`. All methods are `@staticmethod`. |
-| `logger.py` | Logging configuration with `setup_logging()`. |
-| `recalculate_ratings.py` | Standalone script to rebuild all player ratings from match history using TrueSkill Through Time. |
-
-### External Dependencies
-
-| Directory | Purpose |
-|-----------|---------|
-| `TrueSkillThroughTime.py/` | Local copy of the TTT library. Documentation in `README.md`, `RELEASE.md`, and `examples/`. |
-
----
-
-## Key Classes
-
-### `Player` (session_logic.py)
-A dataclass representing a player with TrueSkill ratings:
-- `name`, `gender`, `prior_mu`, `prior_sigma` — static/prior values
-- `mu`, `sigma` — current skill estimate (auto-initialized from priors via `__post_init__`)
-- `database_id` — optional foreign key to the Supabase players table
-- `team_name` — optional partnership group for doubles constraints
-
-### `RoundRecord` (app_types.py)
-Record of a single round in session history:
-- `round_num`, `matches`, `resting_players`, `winners_by_court`
-- Missing keys in `winners_by_court` = unreported courts
-
-### `ClubNightSession` (session_logic.py)
-Orchestrates a club night session:
-- Holds the player table, `round_history: list[RoundRecord]`, court history
-- `round_num`, `current_round_matches`, `resting_players` are `@property` accessors derived from `round_history[-1]`
-- Delegates match generation to the optimizer
-- Methods: `prepare_round()`, `finalize_round()`, `set_court_result()`, `wins()`, `matches_played()`, `get_standings()`, `add_player()`, `remove_player()`
-- `get_standings()` returns `(name, matches, wins, ratio)` derived from `round_history`, sorted by ratio desc then wins desc
-- `add_player()` adds the new player at the back of the rest queue with no past-round bookkeeping; their session stats start at 0/0
-
-### `SessionManager` (session_logic.py)
-Static class for session file persistence (pickle to `sessions/` directory):
-- `save()`, `load()`, `clear()`, `list_sessions()`
-
-### `RestRotationQueue` (session_logic.py)
-Manages fair rotation for resting players:
-- Players at the front rest first, then rotate to the back
-
-### Database Classes (database.py)
-All use `@staticmethod` and translate Supabase exceptions to `DatabaseError`:
-- `PlayerDB`: `get_all_players()`, `upsert_players()`, `delete_players_by_ids()`
-- `SessionDB`: `create_session()`, `get_session_by_name()`, `get_all_sessions()`
-- `MatchDB`: `add_match()`, `get_all_matches()`
-
----
+- The domain layer must contain no database calls and no Streamlit imports.
+- The service layer (`*_service.py`) is the only bridge between UI and domain/database. It exists to keep UI code presentational, keep domain logic DB-free, and make business logic testable without mocking the DB.
+- Infrastructure wraps external services; its exceptions never leak upward (see Error Handling).
 
 ## Conventions
 
-### Error Handling
-- Database operations raise `DatabaseError` (from `exceptions.py`)
-- UI catches errors and displays via `st.error()`
-- Supabase exceptions are wrapped, never exposed to higher layers
+- **Error handling** — Database operations raise `DatabaseError` (from `exceptions.py`); Supabase exceptions are wrapped, never exposed to higher layers. The UI catches errors and displays them via `st.error()`.
+- **Type hints** — Extensive throughout; use the aliases in `app_types.py` (`PlayerName`, `PlayerPair`, `CourtHistory`, …).
+- **Logging** — `logging.getLogger("app.<module_name>")`, configured via `logger.setup_logging()`.
+- **Defaults** — All configuration constants live in `constants.py`.
+- **Doubles vs singles** — Controlled by the `is_doubles` flag; the optimizer has separate logic paths for each mode.
+- **Tests** — pytest, in `tests/unit` and `tests/e2e`; shared fixtures in `tests/conftest.py`.
 
-### Type Hints
-- Extensive type hints throughout codebase
-- Use type aliases from `app_types.py` for readability (e.g. `PlayerName`, `PlayerPair`, `CourtHistory`)
+## Domain contracts
 
-### Logging
-- Use `logging.getLogger("app.<module_name>")` pattern
-- Loggers configured via `logger.setup_logging()`
-
-### Default Values
-- All defaults centralized in `constants.py`
-- `Player.__post_init__` uses `TTT_DEFAULT_MU` / `TTT_DEFAULT_SIGMA` when values are None
-
-### Doubles vs Singles
-- Controlled by `is_doubles` flag
-- `PLAYERS_PER_COURT_DOUBLES = 4`, `PLAYERS_PER_COURT_SINGLES = 2`
-- Optimizer has separate logic paths for each mode
-
----
-
-## Testing
-
-Tests are in `tests/` and use pytest:
-
-```
-tests/
-├── conftest.py         # Shared fixtures (sample_players, sample_gender_stats, etc.)
-├── utils.py            # Test utilities (generate_random_players, run_optimizer_rounds)
-├── unit/
-│   ├── test_optimizer.py
-│   ├── test_session_logic.py
-│   ├── test_rest_rotation_queue.py
-│   ├── test_hub_constraints.py
-│   └── test_rating_service.py
-├── integration/        # (Integration tests)
-└── e2e/                # (End-to-end tests)
-```
-
-Run tests with:
-```bash
-pytest
-```
-
-### Key Test Utilities
-- `generate_random_players(n)` — Creates N players with random ratings
-- `run_optimizer_rounds(...)` — Generator that simulates multiple rounds with state
-
----
+- Session state is **derived from `round_history`**: round number, current matches, resting players, and standings are computed properties, not stored counters. Missing keys in `RoundRecord.winners_by_court` mean unreported courts.
+- `Player` models a persistent registry member: every field is persisted to the players table. Session-scoped state does not belong on it.
+- Team pairing is session state: `ClubNightSession.teams` maps player name → comma-separated team name(s), feeds `get_required_partners()`, and is never persisted to the players table.
+- `prior_mu`/`prior_sigma` are the season-start baseline fed into rating recalculation (set manually, or carried forward at season rollover); `mu`/`sigma` are TTT outputs that evolve with the current season's matches. `conservative_rating = mu - 3*sigma`.
+- Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results.
 
 ## Session Flow
 
@@ -185,22 +68,14 @@ pytest
 
 3. **Rating Recalculation** (`recalculate_ratings.py`)
    - Standalone script, run manually
-   - Fetches all matches, rebuilds TTT history, updates player mu/sigma
-
----
+   - Rebuilds TTT history for the current season and writes each player's `mu`/`sigma`, aging uncertainty to today (see Seasons)
 
 ## Design Notes
 
-### Service Layer Pattern
-The service layer (`*_service.py`) exists to:
-1. Keep UI code focused on presentation
-2. Keep domain logic (`session_logic.py`) free of database dependencies
-3. Enable testing of business logic without mocking DB
-
 ### Optimizer Contract
 - Uses **decoupled inputs** for different optimization objectives:
-  - `tier_ratings` (female skill constant-shifted onto male scale): Used for court grouping (skill spread minimization)
-  - `real_skills` (raw normalized 0-5): Used for team fairness (power balance)
+  - `tier_ratings` (female skill constant-shifted onto male scale): used for court grouping (skill spread minimization)
+  - `real_skills` (raw normalized 0-5): used for team fairness (power balance)
 - This enables **organic gender balancing**: a constant shift aligns the female and male mean skill for grouping
 - Output is `OptimizerResult` with `matches`, `court_history`, `success`
 
@@ -220,6 +95,10 @@ Both have identical public APIs and produce valid matches satisfying all constra
 - **Native boolean logic** (`AddImplication`, `AddBoolOr`) for variable linking
 
 ### TrueSkill Through Time
-- Uses local `TrueSkillThroughTime.py/` library
-- `prior_mu`/`prior_sigma` are static; `mu`/`sigma` evolve with matches
-- `conservative_rating = mu - 3*sigma` is the lower-bound estimate
+- Uses the local `TrueSkillThroughTime.py/` library; docs in its `README.md`, `RELEASE.md`, and `examples/`
+
+### Seasons
+- A season is a **date window**. Sessions belong to a season implicitly via their `created_at` (there is no `season_id` FK). The open season is the single `seasons` row with `end_date IS NULL`; before any season exists, all history is one implicit preseason.
+- **All rating computation is season-scoped.** `ttt_logic.get_ttt_history()` restricts sessions and matches to the current window, so `mu`/`sigma`, the improvement leaderboard, and recalculation reflect only the current season computed on top of carried priors — not the full match history.
+- **Rollover** (`season_service.start_new_season`) converges the closing window and carries each player's end-of-season skill forward as the next season's TTT prior: `prior_mu` = converged `mu`, `prior_sigma` = that endpoint's uncertainty aged to season end. The new season then computes from these priors plus only its own matches. Ordering is retry-safe — priors are written while the old season is still current, then the season is rolled, so a mid-rollover failure self-heals on re-run.
+- Uncertainty inflates with inactivity via `ttt_logic.age_sigma` (drift per idle day, capped at `TTT_DEFAULT_SIGMA`). The same helper is the single source of this rule for recalculation, carry-forward, and the improvement leaderboard.

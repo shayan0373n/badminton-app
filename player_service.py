@@ -7,83 +7,97 @@ the cloud database in sync.
 """
 
 import logging
+from dataclasses import replace
+
 import pandas as pd
 
 from app_types import Gender
-from constants import DEFAULT_IS_DOUBLES, TTT_DEFAULT_SIGMA
 from database import PlayerDB
 from exceptions import DatabaseError
 from session_logic import Player
 
 logger = logging.getLogger("app.player_service")
 
-
-def _get_base_player_data(player_table: dict[str, Player]) -> dict:
-    """Internal helper to extract common player data for DataFrames."""
-    return {
-        "#": range(1, len(player_table) + 1),
-        "Player Name": [p.name for p in player_table.values()],
-        "Gender": [p.gender for p in player_table.values()],
-        "Prior Mu": [p.prior_mu for p in player_table.values()],
-        "Mu": [p.mu for p in player_table.values()],
-        "Sigma": [p.sigma for p in player_table.values()],
-        "Rating": [p.conservative_rating for p in player_table.values()],
-        "database_id": [p.database_id for p in player_table.values()],
-    }
+# Display label -> Player attribute for the registry grid, in column order.
+# Fields absent from this map are never surfaced in the grid, so they are
+# preserved as-is on save (see dataframe_to_players) and can't be silently reset.
+REGISTRY_COLUMN_TO_FIELD = {
+    "Player Name": "name",
+    "Gender": "gender",
+    "Prior Mu": "prior_mu",
+    "Mu": "mu",
+    "Sigma": "sigma",
+}
 
 
 def create_registry_dataframe(player_table: dict[str, Player]) -> pd.DataFrame:
     """Creates a DataFrame for the master member registry."""
-    return pd.DataFrame(_get_base_player_data(player_table))
+    players = list(player_table.values())
+    data: dict = {"#": list(range(1, len(players) + 1))}
+    for column, field_name in REGISTRY_COLUMN_TO_FIELD.items():
+        data[column] = [getattr(p, field_name) for p in players]
+    data["Rating"] = [p.conservative_rating for p in players]
+    data["database_id"] = [p.database_id for p in players]
+    return pd.DataFrame(data)
 
 
-def create_session_setup_dataframe(
-    player_table: dict[str, Player], is_doubles: bool = DEFAULT_IS_DOUBLES
-) -> pd.DataFrame:
-    """
-    Creates a DataFrame for session setup, potentially including team names.
-    Includes 'Team Name' column only if in doubles mode.
-    """
-    df_data = _get_base_player_data(player_table)
-    if is_doubles:
-        df_data["Team Name"] = [
-            p.team_name if hasattr(p, "team_name") else ""
-            for p in player_table.values()
-        ]
-    return pd.DataFrame(df_data)
-
-
-def dataframe_to_players(edited_df: pd.DataFrame) -> dict[str, Player]:
+def dataframe_to_players(
+    edited_df: pd.DataFrame,
+    existing_registry: dict[str, Player] | None = None,
+) -> dict[str, Player]:
     """
     Converts an edited registry DataFrame into a Player dict.
 
-    Handles new players that have empty/NaN values for Mu and Sigma
-    (disabled columns in the UI) by converting them to None.
-    The Player dataclass handles None via __post_init__.
+    The grid is a lossy view of a Player: it only exposes the columns in
+    REGISTRY_COLUMN_TO_FIELD. Each edited row is applied onto the existing
+    Player it refers to (matched by database_id), so any field the grid does
+    not expose (e.g. prior_sigma) is preserved rather than reset. Rows with no
+    matching database_id are treated as new players.
 
     Args:
-        edited_df: DataFrame from the Streamlit data_editor
+        edited_df: DataFrame from the Streamlit data_editor.
+        existing_registry: The registry as loaded from the database, the source
+            of truth for fields the grid does not expose.
 
     Returns:
-        Dictionary mapping player names to Player objects
+        Dictionary mapping player names to Player objects.
     """
-    new_registry = {}
-    for _, row in edited_df.dropna(subset=["Player Name"]).iterrows():
-        # Convert NaN to None for nullable fields (database accepts NULL)
-        db_id = None if pd.isna(row.get("database_id")) else int(row["database_id"])
-        mu = None if pd.isna(row["Mu"]) else float(row["Mu"])
-        sigma = None if pd.isna(row["Sigma"]) else float(row["Sigma"])
+    existing_by_id = {
+        p.database_id: p
+        for p in (existing_registry or {}).values()
+        if p.database_id is not None
+    }
 
-        new_registry[row["Player Name"]] = Player(
-            name=row["Player Name"],
-            gender=Gender(row["Gender"]),
-            prior_mu=float(row["Prior Mu"]),
-            prior_sigma=TTT_DEFAULT_SIGMA,
-            mu=mu,
-            sigma=sigma,
-            database_id=db_id,
-            team_name=row.get("Team Name", ""),
+    new_registry: dict[str, Player] = {}
+    for _, row in edited_df.dropna(subset=["Player Name"]).iterrows():
+        db_id = None if pd.isna(row.get("database_id")) else int(row["database_id"])
+
+        base = existing_by_id.get(db_id)
+        # Start from the existing record (preserving unexposed fields) or a fresh
+        # Player for new rows.
+        player = (
+            replace(base)
+            if base is not None
+            else Player(name=str(row["Player Name"]), gender=Gender(row["Gender"]))
         )
+
+        player.name = str(row["Player Name"])
+        player.gender = Gender(row["Gender"])
+        player.prior_mu = float(row["Prior Mu"])
+        # Mu/Sigma are TTT outputs (disabled in the grid); blank means the
+        # value was never computed, so keep the existing/default one.
+        if not pd.isna(row["Mu"]):
+            player.mu = float(row["Mu"])
+        if not pd.isna(row["Sigma"]):
+            player.sigma = float(row["Sigma"])
+        player.database_id = db_id
+        # Mirror Player.__post_init__ for new players whose mu/sigma weren't given.
+        if player.mu is None:
+            player.mu = player.prior_mu
+        if player.sigma is None:
+            player.sigma = player.prior_sigma
+
+        new_registry[player.name] = player
 
     return new_registry
 

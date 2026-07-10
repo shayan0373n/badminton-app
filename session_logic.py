@@ -141,7 +141,6 @@ class Player:
     # Default to None so __post_init__ can set them to prior values
     mu: float | None = None  # TTT mean skill estimate
     sigma: float | None = None  # TTT uncertainty (standard deviation)
-    team_name: str = ""  # Optional team name for permanent pairing
     database_id: int | None = None  # Supabase row ID for updates
 
     def __post_init__(self) -> None:
@@ -241,8 +240,12 @@ class ClubNightSession:
         is_doubles: bool = True,
         database_id: int | None = None,
         is_recorded: bool = True,
+        teams: dict[PlayerName, str] | None = None,
     ) -> None:
         self.player_pool = players
+        # Session-scoped team memberships: player name -> comma-separated team
+        # name(s). Teams exist only for the duration of a club night.
+        self.teams: dict[PlayerName, str] = teams or {}
         self.num_courts = num_courts
         self._gender_stats = gender_stats
         self.database_id = database_id
@@ -296,12 +299,13 @@ class ClubNightSession:
         """
         # Parse comma-separated team names into groups
         team_groups: dict[str, list[PlayerName]] = defaultdict(list)
-        for player_name, player in self.player_pool.items():
-            if player.team_name:
-                for team in player.team_name.split(","):
-                    team = team.strip()
-                    if team:
-                        team_groups[team].append(player_name)
+        for player_name, team_names in self.teams.items():
+            if player_name not in self.player_pool:
+                continue
+            for team in team_names.split(","):
+                team = team.strip()
+                if team:
+                    team_groups[team].append(player_name)
 
         # Build required partners graph from team memberships
         required: RequiredPartners = defaultdict(set)
@@ -516,7 +520,7 @@ class ClubNightSession:
             prior_sigma: TTT prior uncertainty (standard deviation)
             mu: TTT posterior mean; defaults to prior_mu when None
             sigma: TTT posterior uncertainty; defaults to prior_sigma when None
-            team_name: Optional team name for permanent pairing
+            team_name: Optional comma-separated team name(s) for fixed pairing
 
         Returns:
             True if added successfully, False if name already exists.
@@ -531,8 +535,9 @@ class ClubNightSession:
             prior_sigma=prior_sigma,
             mu=mu,
             sigma=sigma,
-            team_name=team_name,
         )
+        if team_name:
+            self.teams[name] = team_name
         self._rest_queue.add_player(name)
         return True
 
@@ -572,5 +577,6 @@ class ClubNightSession:
         """Internal method to actually remove a player from all structures."""
         if name in self.player_pool:
             del self.player_pool[name]
+        self.teams.pop(name, None)
         self._rest_queue.remove_player(name)
         self.queued_removals.discard(name)

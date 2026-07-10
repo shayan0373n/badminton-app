@@ -247,6 +247,92 @@ class SessionDB:
         return all_sessions
 
 
+class SeasonDB:
+    """Handles season persistence in Supabase.
+
+    A season is a date window. Sessions belong to a season implicitly via their
+    created_at timestamp. The open/current season is the single row with
+    end_date IS NULL; when no season exists yet, all history is one implicit
+    preseason.
+    """
+
+    @staticmethod
+    def get_current_season() -> dict | None:
+        """Returns the open season (end_date IS NULL), or None if none exists.
+
+        None means seasons have not been introduced yet; callers treat that as
+        "all history is one implicit preseason".
+
+        Raises:
+            DatabaseError: If the query fails.
+        """
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("seasons")
+                .select("*")
+                .is_("end_date", "null")
+                .execute()
+            )
+        except Exception as e:
+            logger.exception("Supabase API call failed: get_current_season")
+            raise DatabaseError("Failed to fetch current season from database") from e
+
+        if response.data:
+            return response.data[0]
+        return None
+
+    @staticmethod
+    def create_season(start_date: str) -> int:
+        """Opens a new season starting at start_date (end_date left NULL).
+
+        Args:
+            start_date: ISO timestamp for the season's start_date.
+
+        Returns:
+            The new season's ID.
+
+        Raises:
+            DatabaseError: If the insert fails.
+        """
+        try:
+            supabase = get_supabase_client()
+            response = (
+                supabase.table("seasons")
+                .insert({"start_date": start_date})
+                .execute()
+            )
+        except Exception as e:
+            logger.exception("Supabase API call failed: create_season")
+            raise DatabaseError(f"Failed to create season starting {start_date}") from e
+
+        if response.data:
+            return response.data[0]["id"]
+
+        logger.error(f"Season creation returned empty data for start_date {start_date}")
+        raise DatabaseError(f"Failed to create season starting {start_date} - No ID returned")
+
+    @staticmethod
+    def close_season(season_id: int, end_date: str) -> None:
+        """Stamps a season's end_date, closing it.
+
+        Args:
+            season_id: ID of the season to close.
+            end_date: ISO timestamp to record as the season's end_date.
+
+        Raises:
+            DatabaseError: If the update fails.
+        """
+        try:
+            supabase = get_supabase_client()
+            supabase.table("seasons").update({"end_date": end_date}).eq(
+                "id", season_id
+            ).execute()
+        except Exception as e:
+            logger.exception("Supabase API call failed: close_season")
+            raise DatabaseError(f"Failed to close season {season_id}") from e
+
+
 class MatchDB:
     """Handles match persistence in Supabase."""
 

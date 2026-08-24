@@ -241,8 +241,16 @@ class ClubNightSession:
         database_id: int | None = None,
         is_recorded: bool = True,
         teams: dict[PlayerName, str] | None = None,
+        candidates: dict[PlayerName, "Player"] | None = None,
     ) -> None:
+        # player_pool holds everyone currently checked in and eligible to play.
         self.player_pool = players
+        # candidates is the setup-time guest list: who might turn up tonight.
+        # Checking in copies a candidate into player_pool; checking out removes
+        # them again. Nobody is ever removed from candidates by checking out.
+        self.candidates: dict[PlayerName, "Player"] = (
+            candidates if candidates is not None else dict(players)
+        )
         # Session-scoped team memberships: player name -> comma-separated team
         # name(s). Teams exist only for the duration of a club night.
         self.teams: dict[PlayerName, str] = teams or {}
@@ -265,7 +273,18 @@ class ClubNightSession:
         self._round_active: bool = False
         self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
         self.queued_removals: set[PlayerName] = set()  # Players marked for removal
+        # Players who asked for a harder game. Session-scoped, like teams: a
+        # challenge is a statement about tonight, not a property of the player.
+        self.challengers: set[PlayerName] = set()
         self.results_dirty: bool = False
+
+    def __setstate__(self, state: dict) -> None:
+        """Restores a pickled session, defaulting fields added since it was saved."""
+        self.__dict__.update(state)
+        if "challengers" not in state:
+            self.challengers = set()
+        if "candidates" not in state:
+            self.candidates = dict(self.player_pool)
 
     # -------------------------------------------------------------------------
     # Properties (derived from round_history)
@@ -316,6 +335,90 @@ class ClubNightSession:
                     required[p2].add(p1)
         return dict(required)
 
+    # -------------------------------------------------------------------------
+    # Pairing groups (a friendlier face on `teams`)
+    # -------------------------------------------------------------------------
+
+    def get_groups(self) -> dict[str, list[PlayerName]]:
+        """Returns team name -> members, for members still in the session.
+
+        Groups of one are dropped: a lone member imposes no partner constraint,
+        so surfacing it would show a pairing that does not exist.
+        """
+        groups: dict[str, list[PlayerName]] = defaultdict(list)
+        for player_name, team_names in self.teams.items():
+            if player_name not in self.player_pool:
+                continue
+            for team in team_names.split(","):
+                team = team.strip()
+                if team:
+                    groups[team].append(player_name)
+        return {name: members for name, members in groups.items() if len(members) > 1}
+
+    def _next_group_name(self) -> str:
+        """Returns an unused generated group name."""
+        existing = {
+            team.strip()
+            for names in self.teams.values()
+            for team in names.split(",")
+            if team.strip()
+        }
+        i = 1
+        while f"G{i}" in existing:
+            i += 1
+        return f"G{i}"
+
+    def group_of(self, name: PlayerName) -> str | None:
+        """Returns the group a player belongs to, or None."""
+        for group_name, members in self.get_groups().items():
+            if name in members:
+                return group_name
+        return None
+
+    def pair_players(self, first: PlayerName, second: PlayerName) -> str | None:
+        """Puts two players in the same group, merging existing groups if needed.
+
+        Dragging one name onto another is the only way this is reached, so the
+        two are joined into a single group rather than accumulating memberships.
+
+        Returns:
+            The resulting group name, or None if either player is not checked in
+            or the two are the same person.
+        """
+        if first == second:
+            return None
+        if first not in self.player_pool or second not in self.player_pool:
+            return None
+
+        group = self.group_of(first) or self.group_of(second) or self._next_group_name()
+
+        # Absorb the other player's group wholesale so nobody is silently orphaned.
+        members = {first, second}
+        for player in (first, second):
+            other = self.group_of(player)
+            if other and other != group:
+                members.update(self.get_groups().get(other, []))
+
+        for player in members:
+            self.teams[player] = group
+        return group
+
+    def unpair_player(self, name: PlayerName) -> bool:
+        """Removes a player from their group. Returns True if they were in one."""
+        if self.group_of(name) is None:
+            return False
+        self.teams.pop(name, None)
+        return True
+
+    def dissolve_group(self, group_name: str) -> bool:
+        """Breaks up a whole group. Returns True if it existed."""
+        members = self.get_groups().get(group_name)
+        if not members:
+            return False
+        for member in members:
+            self.teams.pop(member, None)
+        return True
+
     def prepare_round(self) -> None:
         """Determines resting players and generates optimized matches for the next round.
 
@@ -346,7 +449,7 @@ class ClubNightSession:
 
         player_genders = {p.name: p.gender for p in self.player_pool.values()}
         tier_ratings, real_skills = prepare_optimizer_ratings(
-            boosted_pool, self._gender_stats
+            boosted_pool, self._gender_stats, self.challengers
         )
 
         # Call the optimizer with decoupled inputs
@@ -528,7 +631,7 @@ class ClubNightSession:
         if name in self.player_pool:
             return False
 
-        self.player_pool[name] = Player(
+        player = Player(
             name=name,
             gender=gender,
             prior_mu=prior_mu,
@@ -536,10 +639,79 @@ class ClubNightSession:
             mu=mu,
             sigma=sigma,
         )
+        self.player_pool[name] = player
+        self.candidates.setdefault(name, player)
         if team_name:
             self.teams[name] = team_name
         self._rest_queue.add_player(name)
         return True
+
+    def check_in(self, name: PlayerName, wants_challenge: bool = False) -> bool:
+        """Moves a candidate into the playing pool.
+
+        Checking in *is* joining the pool, so this reuses add_player and the
+        rest rotation needs no notion of presence beyond who is in the pool.
+
+        Args:
+            name: A name from `candidates`
+            wants_challenge: Set when the player long-pressed for a harder game
+
+        Returns:
+            True if they were checked in, False if unknown or already in.
+        """
+        if name in self.player_pool:
+            return False
+
+        candidate = self.candidates.get(name)
+        if candidate is None:
+            return False
+
+        added = self.add_player(
+            name=candidate.name,
+            gender=candidate.gender,
+            prior_mu=candidate.prior_mu,
+            prior_sigma=candidate.prior_sigma,
+            mu=candidate.mu,
+            sigma=candidate.sigma,
+        )
+        if added and wants_challenge:
+            self.set_challenge(name, True)
+        return added
+
+    def check_out(self, name: PlayerName) -> tuple[bool, str]:
+        """Removes a player from the pool, keeping them on the candidate list.
+
+        Returns:
+            Tuple of (success, status) where status is 'immediate', 'queued', or
+            'not_found' -- queued when they are mid-round, exactly as removal works.
+        """
+        return self.remove_player(name)
+
+    def set_challenge(self, name: PlayerName, wants_challenge: bool) -> bool:
+        """Flags or clears a player's request for a harder game.
+
+        The flag persists until cleared; it is not consumed by being honoured.
+
+        Args:
+            name: The player's name
+            wants_challenge: True to flag, False to clear
+
+        Returns:
+            True if the player is in the session, False otherwise.
+        """
+        if name not in self.player_pool:
+            return False
+
+        if wants_challenge:
+            self.challengers.add(name)
+        else:
+            self.challengers.discard(name)
+        return True
+
+    def toggle_challenge(self, name: PlayerName) -> bool:
+        """Flips a player's challenge flag. Returns the resulting state."""
+        self.set_challenge(name, name not in self.challengers)
+        return name in self.challengers
 
     def remove_player(self, name: str) -> tuple[bool, str]:
         """
@@ -578,5 +750,6 @@ class ClubNightSession:
         if name in self.player_pool:
             del self.player_pool[name]
         self.teams.pop(name, None)
+        self.challengers.discard(name)
         self._rest_queue.remove_player(name)
         self.queued_removals.discard(name)

@@ -6,3 +6,5 @@ gurobipy
 ortools
 supabase
 trueskillthroughtime
+fastapi
+uvicorn[standard]

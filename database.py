@@ -8,10 +8,12 @@ All methods translate Supabase exceptions to DatabaseError for consistent error 
 
 import logging
 
-import streamlit as st
+from functools import cache
+
 from supabase import create_client, Client
 
 
+from config import require_secret
 from exceptions import DatabaseError
 from session_logic import Player
 from app_types import Gender
@@ -20,10 +22,11 @@ logger = logging.getLogger("app.database")
 
 
 # Initialize Supabase client
-@st.cache_resource
+@cache
 def get_supabase_client() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    """Returns the process-wide Supabase client, created on first use."""
+    url = require_secret("SUPABASE_URL")
+    key = require_secret("SUPABASE_KEY")
     return create_client(url, key)
 
 

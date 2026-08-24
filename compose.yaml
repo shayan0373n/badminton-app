@@ -1,0 +1,31 @@
+# Deployment definition for the play app.
+#
+# The host's compose project pulls this in with `include:` (see
+# /root/docker-compose.yml), so the service lives in the same repo as the code
+# it deploys: ports, labels, mounts and env are reviewable in a pull request
+# rather than hand-edited on the box.
+#
+# Paths below resolve relative to *this file's* directory, which is what lets
+# the repo describe its own deployment without knowing where it is checked out.
+#
+# Networking is deliberately absent: included services join the host project's
+# default network, which is the one Traefik watches. Traefik terminates TLS and
+# routes by the labels below, so this container publishes no host ports.
+
+services:
+  play:
+    build: .
+    container_name: play_app
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      # Pickled sessions. The directory must be owned by uid 999 on the host —
+      # the image's non-root `app` user — or the container cannot write to it.
+      - ./sessions:/app/sessions
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.play.rule=Host(`play.iranfin.fi`)"
+      - "traefik.http.routers.play.entrypoints=websecure"
+      - "traefik.http.routers.play.tls.certresolver=myresolver"
+      - "traefik.http.services.play.loadbalancer.server.port=8000"

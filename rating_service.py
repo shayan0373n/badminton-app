@@ -14,6 +14,7 @@ from statistics import mean, stdev
 
 from app_types import Gender, GenderStats, PlayerName, RealSkills, TierRatings
 from constants import (
+    CHALLENGE_TIER_BOOST_MU,
     FALLBACK_GENDER_MEAN,
     FALLBACK_GENDER_STD,
     MIN_PLAYERS_FOR_GENDER_STATS,
@@ -128,21 +129,33 @@ def compute_real_skill(mu: float) -> float:
 def prepare_optimizer_ratings(
     players: dict[PlayerName, PlayerLike],
     gender_stats: GenderStats,
+    challengers: set[PlayerName] | None = None,
 ) -> tuple[TierRatings, RealSkills]:
     """Prepare both tier ratings and real skills for the optimizer.
+
+    Challengers are boosted in the tier channel only. Tier ratings drive court
+    grouping, so the boost lifts them toward a stronger court; real skills drive
+    team balancing, so leaving those untouched means the optimizer still sees
+    their true strength and pairs them with a stronger partner to compensate.
+    Boosting mu itself would move both channels and hand them a weaker partner.
 
     Args:
         players: Dict mapping player names to Player objects
         gender_stats: Pre-computed gender statistics
+        challengers: Names that asked for a harder game; None means nobody did
 
     Returns:
         Tuple of (tier_ratings, real_skills) dicts, both on optimizer scale.
     """
+    challengers = challengers or set()
     tier_ratings: TierRatings = {}
     real_skills: RealSkills = {}
 
     for name, player in players.items():
-        tier_ratings[name] = compute_tier_rating(player.mu, player.gender, gender_stats)
+        tier_mu = player.mu
+        if name in challengers:
+            tier_mu += CHALLENGE_TIER_BOOST_MU
+        tier_ratings[name] = compute_tier_rating(tier_mu, player.gender, gender_stats)
         real_skills[name] = compute_real_skill(player.mu)
 
     return tier_ratings, real_skills

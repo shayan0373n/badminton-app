@@ -1,0 +1,69 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # A second push while a build is running would fight over the same working
+  # tree on the box, so let the newer one wait rather than interleave.
+  group: deploy-play
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run Python tests
+        # The domain and API suites need no database; Supabase is stubbed.
+        run: pytest tests/unit -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install client dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck client
+        working-directory: frontend
+        run: npx tsc -b --noEmit
+
+      - name: Run client tests
+        working-directory: frontend
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.VPS_PATH }}
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose -f /root/docker-compose.yml up -d --build play
+            # Fail the run rather than report green on a container that died.
+            sleep 5
+            docker compose -f /root/docker-compose.yml ps --status running --format '{{.Name}}' | grep -q play_app
+            docker compose -f /root/docker-compose.yml exec -T play python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"

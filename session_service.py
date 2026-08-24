@@ -12,7 +12,7 @@ import logging
 from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
 from rating_service import compute_gender_statistics
-from session_logic import ClubNightSession, Player, SessionManager
+from session_logic import ClubNightSession, DoublesMatch, Player, SessionManager
 from app_types import Gender, RoundRecord
 
 logger = logging.getLogger("app.session_service")
@@ -271,6 +271,8 @@ def create_new_session(
     is_doubles: bool,
     is_recorded: bool = True,
     teams: dict[str, str] | None = None,
+    candidates: dict[str, Player] | None = None,
+    prepare_first_round: bool = True,
 ) -> ClubNightSession:
     """
     Creates and initializes a new session.
@@ -278,8 +280,13 @@ def create_new_session(
     1. Computes gender statistics from all registered players
     2. Creates session record in Database (if recorded)
     3. Initializes ClubNightSession object
-    4. Prepares the first round
+    4. Prepares the first round, unless the caller checks players in first
     5. Saves session to disk
+
+    Args:
+        player_table: Players already in the pool; empty for a check-in flow
+        candidates: Who might turn up tonight; defaults to player_table
+        prepare_first_round: False when a check-in page runs before round one
 
     Returns:
         The initialized ClubNightSession object.
@@ -306,12 +313,189 @@ def create_new_session(
         is_doubles=is_doubles,
         is_recorded=is_recorded,
         teams=teams,
+        candidates=candidates,
     )
 
     # 4. Prepare First Round
-    session.prepare_round()
+    if prepare_first_round:
+        session.prepare_round()
 
     # 5. Save to Disk
     SessionManager.save(session, session_name)
 
     return session
+
+
+# =============================================================================
+# Check-in hub operations
+# =============================================================================
+
+
+def check_in_player(
+    session: ClubNightSession,
+    session_name: str,
+    player_name: str,
+    wants_challenge: bool = False,
+) -> bool:
+    """Checks a candidate into the playing pool and persists.
+
+    Args:
+        session: The active session
+        session_name: Name of the session (for saving)
+        player_name: A name from the session's candidate list
+        wants_challenge: True when the player long-pressed for a harder game
+
+    Returns:
+        True if checked in, False if unknown or already in.
+    """
+    checked_in = session.check_in(player_name, wants_challenge=wants_challenge)
+    if checked_in:
+        SessionManager.save(session, session_name)
+    return checked_in
+
+
+def check_out_player(
+    session: ClubNightSession, session_name: str, player_name: str
+) -> tuple[bool, str]:
+    """Removes a player from the pool, keeping them on the candidate list.
+
+    Returns:
+        Tuple of (success, status) where status is 'immediate', 'queued', or
+        'not_found' -- queued when they are mid-round.
+    """
+    success, status = session.check_out(player_name)
+    if success:
+        SessionManager.save(session, session_name)
+    return success, status
+
+
+def set_player_challenge(
+    session: ClubNightSession,
+    session_name: str,
+    player_name: str,
+    wants_challenge: bool,
+) -> bool:
+    """Sets or clears a player's challenge flag and persists."""
+    changed = session.set_challenge(player_name, wants_challenge)
+    if changed:
+        SessionManager.save(session, session_name)
+    return changed
+
+
+def pair_players(
+    session: ClubNightSession, session_name: str, first: str, second: str
+) -> str | None:
+    """Puts two checked-in players in the same pairing group and persists.
+
+    Returns:
+        The group name, or None if either player is not checked in.
+    """
+    group = session.pair_players(first, second)
+    if group:
+        SessionManager.save(session, session_name)
+    return group
+
+
+def unpair_player(
+    session: ClubNightSession, session_name: str, player_name: str
+) -> bool:
+    """Pulls one player out of their pairing group and persists."""
+    removed = session.unpair_player(player_name)
+    if removed:
+        SessionManager.save(session, session_name)
+    return removed
+
+
+def dissolve_group(
+    session: ClubNightSession, session_name: str, group_name: str
+) -> bool:
+    """Breaks up a whole pairing group and persists."""
+    dissolved = session.dissolve_group(group_name)
+    if dissolved:
+        SessionManager.save(session, session_name)
+    return dissolved
+
+
+# =============================================================================
+# Read model
+# =============================================================================
+
+
+def _match_sides(match) -> tuple[list[str], list[str]]:
+    """Returns both sides of a match as name lists, uniform across game modes."""
+    if isinstance(match, DoublesMatch):
+        return list(match.team_1), list(match.team_2)
+    return [match.player_1], [match.player_2]
+
+
+def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict:
+    """Returns the whole computed view of a session, ready to serialize.
+
+    Round number, standings, resting players and current matches are all derived
+    from round_history rather than stored. Computing them here keeps that logic
+    in one place -- the client renders this and never recomputes any of it.
+    """
+    groups = session.get_groups()
+    group_of = {member: name for name, members in groups.items() for member in members}
+    locked_pairs = {
+        tuple(sorted((player, partner)))
+        for player, partners in session.get_required_partners().items()
+        for partner in partners
+    }
+
+    rounds = []
+    for record in session.round_history:
+        matches = []
+        for match in record.matches:
+            side_1, side_2 = _match_sides(match)
+            stored = record.winners_by_court.get(match.court)
+            winner = None if stored is None else (1 if set(stored) == set(side_1) else 2)
+            matches.append(
+                {
+                    "court": match.court,
+                    "team_1": side_1,
+                    "team_2": side_2,
+                    "locked_1": tuple(sorted(side_1)) in locked_pairs,
+                    "locked_2": tuple(sorted(side_2)) in locked_pairs,
+                    "winner": winner,
+                }
+            )
+        rounds.append(
+            {
+                "round_num": record.round_num,
+                "resting": sorted(
+                    p for p in record.resting_players if p in session.player_pool
+                ),
+                "matches": matches,
+            }
+        )
+
+    return {
+        "name": session_name,
+        "is_doubles": session.is_doubles,
+        "is_recorded": session.is_recorded,
+        "num_courts": int(session.num_courts),
+        "weights": dict(session.weights),
+        "round_num": session.round_num,
+        "results_dirty": session.results_dirty,
+        "queued_removals": sorted(session.queued_removals),
+        "candidates": [
+            {
+                "name": name,
+                "gender": player.gender.value,
+                "checked_in": name in session.player_pool,
+                "challenging": name in session.challengers,
+                "group": group_of.get(name),
+            }
+            for name, player in sorted(session.candidates.items())
+        ],
+        "groups": [
+            {"name": name, "members": sorted(members)}
+            for name, members in sorted(groups.items())
+        ],
+        "rounds": rounds,
+        "standings": [
+            {"name": name, "matches": matches, "wins": wins, "ratio": ratio}
+            for name, matches, wins, ratio in session.get_standings()
+        ],
+    }

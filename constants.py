@@ -94,6 +94,13 @@ TTT_BETA = 4.0  # Performance noise std dev per game
 # Previous value 0.13 allowed ~0.5 levels of drift per season.
 TTT_GAMMA = 0.25  # Skill drift per day (std dev of random walk per time unit)
 
+# Challenge mode: mu added to a player's TIER rating only (court grouping),
+# never to their real skill (team balancing). One club skill level is 7 mu --
+# 25 is intermediate, 32 intermediate-plus, 18 intermediate-minus -- so a
+# challenger is grouped roughly one court higher while team balancing still
+# uses their true strength, giving them a stronger partner rather than a weaker one.
+CHALLENGE_TIER_BOOST_MU = 7.0
+
 # Session performance feedback: amount of mu added per (wins - losses) for
 # matchmaking within a session. +0.5 mu per win, -0.5 mu per loss; rest is
 # neutral. Symmetric around a 50% win rate.

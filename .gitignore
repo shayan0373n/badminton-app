@@ -210,3 +210,11 @@ __marimo__/
 
 # Scratch / experiment scripts (not tracked)
 scratch/
+
+# Deployment secrets
+.env
+
+# Frontend build artefacts
+frontend/dist/
+frontend/node_modules/
+frontend/*.tsbuildinfo

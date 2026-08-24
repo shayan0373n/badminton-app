@@ -12,8 +12,12 @@ The app follows a **layered architecture** with clear separation of concerns:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    UI Layer (Streamlit)                  │
-│             1_Setup.py, pages/2_Session.py               │
+│                       UI Layer                           │
+│   frontend/ (React SPA)  ·  1_Setup.py, pages/2_Session  │
+├─────────────────────────────────────────────────────────┤
+│                       API Layer                          │
+│                         api.py                           │
+│       (Routing and serialization only, no logic)         │
 ├─────────────────────────────────────────────────────────┤
 │                    Service Layer                         │
 │  session_service.py, player_service.py, rating_service.py│
@@ -24,16 +28,23 @@ The app follows a **layered architecture** with clear separation of concerns:
 │        (Pure business logic, no database calls)          │
 ├─────────────────────────────────────────────────────────┤
 │                  Infrastructure Layer                    │
-│           database.py, exceptions.py, logger.py          │
+│    config.py, database.py, exceptions.py, logger.py      │
 │           (External services and utilities)              │
 └─────────────────────────────────────────────────────────┘
 ```
+
+Two front ends run against the same service layer. The React client is the one
+being developed; the Streamlit pages still work and are kept until it replaces
+them outright.
 
 Rules (these are norms for future changes, not just descriptions):
 
 - The domain layer must contain no database calls and no Streamlit imports.
 - The service layer (`*_service.py`) is the only bridge between UI and domain/database. It exists to keep UI code presentational, keep domain logic DB-free, and make business logic testable without mocking the DB.
 - Infrastructure wraps external services; its exceptions never leak upward (see Error Handling).
+- **No module outside the UI layer imports Streamlit.** Secrets come from `config.py`, which reads the environment and falls back to `.streamlit/secrets.toml`, so the same code runs under any front end and in the standalone scripts.
+- **`api.py` holds no business logic.** It validates input, calls a service function, and serializes the result. A rule belonging to the domain must never be re-expressed as a route.
+- **The client never recomputes derived state.** `session_service.build_session_snapshot()` is the single read model: it computes standings, resting players, round numbering and pairing locks, and the client renders that. Duplicating any of it client-side would create a second source of truth.
 
 ## Conventions
 
@@ -48,11 +59,33 @@ Rules (these are norms for future changes, not just descriptions):
 
 - Session state is **derived from `round_history`**: round number, current matches, resting players, and standings are computed properties, not stored counters. Missing keys in `RoundRecord.winners_by_court` mean unreported courts.
 - `Player` models a persistent registry member: every field is persisted to the players table. Session-scoped state does not belong on it.
-- Team pairing is session state: `ClubNightSession.teams` maps player name → comma-separated team name(s), feeds `get_required_partners()`, and is never persisted to the players table.
+- Team pairing is session state: `ClubNightSession.teams` maps player name → comma-separated team name(s), feeds `get_required_partners()`, and is never persisted to the players table. Drag-to-pair is a face on this: `pair_players()` merges two players into one generated group name, and a group of any size forces its members to partner.
+- `player_pool` is who is **checked in**; `candidates` is who might turn up. Checking in copies a candidate into the pool via `add_player`; checking out removes them and leaves them a candidate. Presence is pool membership, so the rest queue needs no separate notion of it.
+- `challengers` is the set of players asking for a harder game. It persists until cleared rather than being consumed, and is dropped when a player leaves. Like `teams`, it is session-scoped and never reaches the players table.
+- Changes made between rounds never disturb the round in play. Court count, weights, check-outs and pairing all land when the next round is prepared — which is what lets the check-in page double as the mid-session management screen.
 - `prior_mu`/`prior_sigma` are the season-start baseline fed into rating recalculation (set manually, or carried forward at season rollover); `mu`/`sigma` are TTT outputs that evolve with the current season's matches. `conservative_rating = mu - 3*sigma`.
 - Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results.
 
 ## Session Flow
+
+### React client (`frontend/`)
+
+Three screens. Setup picks who might come and how many courts; the check-in hub
+is where the night is run from; the session screen is for playing only.
+
+1. **Setup** — choose candidates, courts, and whether the night counts toward
+   ratings. `POST /api/sessions` creates the session with an open roster and no
+   first round.
+2. **Check-in hub** — tap a name to check in, press and hold to check in wanting
+   a harder game, drag one name onto another to pair. The side menu holds every
+   management action: add or remove players, adjust courts and weights, upload
+   results, end the night. Start generates round one and goes to the courts.
+3. **Session** — courts, results, games from earlier rounds still needing a
+   result, and standings. No controls but round navigation and Back, which
+   returns to the hub. Pressing Start there again returns to the round in play;
+   only "Next round" advances.
+
+### Streamlit pages
 
 1. **Setup Page** (`1_Setup.py`)
    - Load/edit player registry from database
@@ -78,6 +111,20 @@ Rules (these are norms for future changes, not just descriptions):
   - `real_skills` (raw normalized 0-5): used for team fairness (power balance)
 - This enables **organic gender balancing**: a constant shift aligns the female and male mean skill for grouping
 - Output is `OptimizerResult` with `matches`, `court_history`, `success`
+
+**Challenge mode** boosts `tier_ratings` only, by `CHALLENGE_TIER_BOOST_MU`
+(7 mu, one club skill level). Tier ratings drive court grouping, so the
+challenger is pulled toward a stronger court; `real_skills` is left alone, so
+team balancing still sees their true strength and gives them a *stronger*
+partner to cover the gap. Boosting `mu` instead would move both channels and
+hand them a weaker partner — the opposite of the intent. The boost is a soft
+nudge, not a guarantee: the objective minimizes spread, so a lone challenger can
+still be grouped back down when lifting them costs more elsewhere.
+
+Note that `SESSION_PERFORMANCE_FACTOR` does mutate `mu`, and so moves both
+channels. That is deliberate for win/loss form — playing well tonight genuinely
+means both — but it is the same mechanism challenge mode avoids, so the two
+should not be assumed to work alike.
 
 ### Solver Backends
 The `SOLVER_BACKEND` constant in `constants.py` selects between two optimizer implementations:

@@ -38,7 +38,7 @@ Rules (these are norms for future changes, not just descriptions):
 - The domain layer must contain no database calls and no UI or framework imports.
 - The service layer (`*_service.py`) is the only bridge between UI and domain/database. It exists to keep UI code presentational, keep domain logic DB-free, and make business logic testable without mocking the DB.
 - Infrastructure wraps external services; its exceptions never leak upward (see Error Handling).
-- **Nothing imports Streamlit.** Secrets come from `config.py`, which reads the environment and falls back to `.streamlit/secrets.toml`, so the same code runs under the API and in the standalone scripts.
+- **Secrets come from `config.py`**, which reads the environment and falls back to a local `.env`. Deployment passes the same file through compose's `env_file`, so there is one credential format and one place to put it.
 - **`api.py` holds no business logic.** It validates input, calls a service function, and serializes the result. A rule belonging to the domain must never be re-expressed as a route.
 - **The client never recomputes derived state.** `session_service.build_session_snapshot()` is the single read model: it computes standings, resting players, round numbering and pairing locks, and the client renders that. Duplicating any of it client-side would create a second source of truth.
 

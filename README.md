@@ -35,12 +35,10 @@ for a harder game.
    cd frontend && npm install && cd ..
    ```
 
-2. Configure Supabase credentials, either as environment variables or in
-   `.streamlit/secrets.toml` (the path is historical, but it is where local
-   credentials already live):
-   ```toml
-   SUPABASE_URL = "your-supabase-url"
-   SUPABASE_KEY = "your-supabase-key"
+2. Configure Supabase credentials, either as environment variables or in a
+   local `.env`:
+   ```bash
+   cp .env.example .env    # then fill in the two values
    ```
 
 ## Running

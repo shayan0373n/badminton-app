@@ -2,7 +2,6 @@
 .git
 .gitignore
 .env
-.streamlit/secrets.toml
 frontend/node_modules
 frontend/dist
 sessions/

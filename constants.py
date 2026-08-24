@@ -115,9 +115,3 @@ SESSION_PERFORMANCE_FACTOR = 0.5
 FALLBACK_GENDER_MEAN = TTT_MU_AVERAGE  # 25.0
 FALLBACK_GENDER_STD = 4.0
 MIN_PLAYERS_FOR_GENDER_STATS = 3
-
-# =============================================================================
-# Page Navigation Constants
-# =============================================================================
-PAGE_SETUP = "1_Setup.py"
-PAGE_SESSION = "2_Session.py"

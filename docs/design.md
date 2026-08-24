@@ -13,7 +13,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                       UI Layer                           │
-│   frontend/ (React SPA)  ·  1_Setup.py, pages/2_Session  │
+│                   frontend/ (React SPA)                  │
 ├─────────────────────────────────────────────────────────┤
 │                       API Layer                          │
 │                         api.py                           │
@@ -33,16 +33,12 @@ The app follows a **layered architecture** with clear separation of concerns:
 └─────────────────────────────────────────────────────────┘
 ```
 
-Two front ends run against the same service layer. The React client is the one
-being developed; the Streamlit pages still work and are kept until it replaces
-them outright.
-
 Rules (these are norms for future changes, not just descriptions):
 
-- The domain layer must contain no database calls and no Streamlit imports.
+- The domain layer must contain no database calls and no UI or framework imports.
 - The service layer (`*_service.py`) is the only bridge between UI and domain/database. It exists to keep UI code presentational, keep domain logic DB-free, and make business logic testable without mocking the DB.
 - Infrastructure wraps external services; its exceptions never leak upward (see Error Handling).
-- **No module outside the UI layer imports Streamlit.** Secrets come from `config.py`, which reads the environment and falls back to `.streamlit/secrets.toml`, so the same code runs under any front end and in the standalone scripts.
+- **Nothing imports Streamlit.** Secrets come from `config.py`, which reads the environment and falls back to `.streamlit/secrets.toml`, so the same code runs under the API and in the standalone scripts.
 - **`api.py` holds no business logic.** It validates input, calls a service function, and serializes the result. A rule belonging to the domain must never be re-expressed as a route.
 - **The client never recomputes derived state.** `session_service.build_session_snapshot()` is the single read model: it computes standings, resting players, round numbering and pairing locks, and the client renders that. Duplicating any of it client-side would create a second source of truth.
 
@@ -53,7 +49,7 @@ Rules (these are norms for future changes, not just descriptions):
 - **Logging** — `logging.getLogger("app.<module_name>")`, configured via `logger.setup_logging()`.
 - **Defaults** — All configuration constants live in `constants.py`.
 - **Doubles vs singles** — Controlled by the `is_doubles` flag; the optimizer has separate logic paths for each mode.
-- **Tests** — pytest, in `tests/unit` and `tests/e2e`; shared fixtures in `tests/conftest.py`.
+- **Tests** — pytest in `tests/unit` with shared fixtures in `tests/conftest.py`; Vitest in `frontend/src`.
 
 ## Domain contracts
 
@@ -68,7 +64,7 @@ Rules (these are norms for future changes, not just descriptions):
 
 ## Session Flow
 
-### React client (`frontend/`)
+### Club night (`frontend/`)
 
 Three screens. Setup picks who might come and how many courts; the check-in hub
 is where the night is run from; the session screen is for playing only.
@@ -85,21 +81,9 @@ is where the night is run from; the session screen is for playing only.
    returns to the hub. Pressing Start there again returns to the round in play;
    only "Next round" advances.
 
-### Streamlit pages
+### Rating recalculation
 
-1. **Setup Page** (`1_Setup.py`)
-   - Load/edit player registry from database
-   - Configure courts and optimizer weights
-   - Click "Start Session" → calls `session_service.create_new_session()`
-
-2. **Session Page** (`pages/2_Session.py`)
-   - Navigate between rounds with prev/next buttons
-   - Select winners per court (auto-saved on change via `session_service.save_court_result()`)
-   - "Next ▶" on latest round → calls `session_service.advance_to_next_round()` (partial results OK)
-   - "Submit Results" in sidebar → calls `session_service.submit_session_results()` (idempotent: deletes + re-inserts all matches for the session)
-   - Unentered games from other rounds are displayed at the bottom of the page in chronological order, allowing quick result entry without navigating away.
-
-3. **Rating Recalculation** (`recalculate_ratings.py`)
+**Rating Recalculation** (`recalculate_ratings.py`)
    - Standalone script, run manually
    - Rebuilds TTT history for the current season and writes each player's `mu`/`sigma`, aging uncertainty to today (see Seasons)
 

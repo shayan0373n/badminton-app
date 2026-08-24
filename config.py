@@ -2,9 +2,9 @@
 Configuration loading for the Badminton App.
 
 Secrets are read from environment variables, falling back to
-``.streamlit/secrets.toml`` so local development and the Streamlit pages keep
-working without any extra setup. Nothing here imports Streamlit, which is what
-lets the domain and service layers run under any front end.
+``.streamlit/secrets.toml`` for local development. That path is historical --
+it predates the React client -- but it is where local credentials already live,
+so it is kept as a fallback. Deployment supplies the environment directly.
 """
 
 import logging

@@ -1,6 +1,9 @@
 # Badminton Club Night Manager
 
-A Streamlit-based application for organizing badminton club night sessions with optimized match generation and skill-based player ratings.
+An application for organizing badminton club night sessions, with optimized match
+generation and skill-based player ratings. Players check themselves in on a shared
+tablet at the door, pair up by dragging names together, and press and hold to ask
+for a harder game.
 
 ## Features
 
@@ -18,7 +21,7 @@ A Streamlit-based application for organizing badminton club night sessions with 
 
 ## Tech Stack
 
-- **Frontend**: React + Vite (the Streamlit pages are still there while it settles)
+- **Frontend**: React + Vite
 - **API**: FastAPI
 - **Optimization**: OR-Tools CP-SAT (Gurobi optional)
 - **Database**: Supabase
@@ -33,7 +36,8 @@ A Streamlit-based application for organizing badminton club night sessions with 
    ```
 
 2. Configure Supabase credentials, either as environment variables or in
-   `.streamlit/secrets.toml`:
+   `.streamlit/secrets.toml` (the path is historical, but it is where local
+   credentials already live):
    ```toml
    SUPABASE_URL = "your-supabase-url"
    SUPABASE_KEY = "your-supabase-key"
@@ -53,12 +57,6 @@ For a single process, build the client first and let the API serve it:
 ```bash
 cd frontend && npm run build && cd ..
 uvicorn api:app                     # everything on :8000
-```
-
-**Streamlit pages** (unchanged):
-
-```bash
-streamlit run 1_Setup.py
 ```
 
 ## Usage
@@ -123,9 +121,7 @@ suites first and checks `/api/health` afterwards. It needs the repo secrets
 ├── api.py               # HTTP API over the service layer
 ├── frontend/            # React client (setup, check-in hub, session)
 ├── config.py            # Secrets from env, falling back to secrets.toml
-├── 1_Setup.py           # Streamlit entry point and session setup UI
-├── pages/
-│   └── 2_Session.py     # Streamlit active session UI
+├── compose.yaml         # Service definition, included by the host compose project
 ├── session_logic.py     # Core session and player logic
 ├── optimizer.py         # Match generation optimization
 ├── rating_service.py    # Tier rating and real skill computation

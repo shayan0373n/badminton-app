@@ -10,6 +10,7 @@ season's matches. Carry-forward and season creation are always one operation.
 import logging
 from datetime import date, datetime, timedelta
 
+from constants import SEASON_MIN_PRIOR_SIGMA
 from database import PlayerDB, SeasonDB
 from ttt_logic import age_sigma, get_ttt_history
 
@@ -21,7 +22,8 @@ def carry_forward_priors(end_day: int) -> dict:
 
     prior_mu is the converged mu as of end_day (the player's last match on or
     before end_day, ignoring any later matches). prior_sigma is that endpoint
-    sigma aged forward by TTT drift to end_day (see ttt_logic.age_sigma).
+    sigma aged forward by TTT drift to end_day (see ttt_logic.age_sigma), floored
+    at SEASON_MIN_PRIOR_SIGMA to prevent rating inertia in the new season.
     Players with no matches on or before end_day keep their existing priors.
     Converged mu/sigma are also persisted (the end-of-season standings).
 
@@ -52,7 +54,9 @@ def carry_forward_priors(end_day: int) -> dict:
         player.mu = final.mu
         player.sigma = final.sigma
         player.prior_mu = final.mu
-        player.prior_sigma = age_sigma(final.sigma, end_day - final_day)
+        player.prior_sigma = max(
+            age_sigma(final.sigma, end_day - final_day), SEASON_MIN_PRIOR_SIGMA
+        )
         updated += 1
 
     logger.info(f"Carried forward priors for {updated} player(s).")

@@ -77,6 +77,10 @@ TTT_DEFAULT_MU = TTT_MU_AVERAGE
 # toward, so no one is ever treated as more uncertain than a never-seen player.
 TTT_DEFAULT_SIGMA = 6.0
 
+# Minimum uncertainty (sigma) carried forward into a new season at rollover.
+# Prevents rating inertia for highly active players so ratings adapt to new-season form.
+SEASON_MIN_PRIOR_SIGMA = 3.0
+
 # Game dynamics
 # Beta models within-game randomness: a player's performance in a single game
 # is drawn from N(skill, beta²). With beta=4.0 and 1 level = 3.5 mu:

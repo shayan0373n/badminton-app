@@ -65,3 +65,27 @@ CREATE TABLE IF NOT EXISTS public.matches (
   CONSTRAINT fk_matches_player_3 FOREIGN KEY (player_3) REFERENCES public.players(name) ON UPDATE CASCADE,
   CONSTRAINT fk_matches_player_4 FOREIGN KEY (player_4) REFERENCES public.players(name) ON UPDATE CASCADE
 );
+
+-- =============================================================================
+-- Row Level Security
+-- =============================================================================
+-- The data API is closed. No role reaches these tables except one that bypasses
+-- RLS, so the app must connect with a secret key (sb_secret_*, which maps to
+-- service_role); a publishable key gets nothing. That applies to the deployed
+-- app and to the standalone scripts alike -- recalculate_ratings.py and
+-- start_new_season.py read the same SUPABASE_KEY from a local secrets.toml.
+--
+-- Two independent layers, either of which alone would suffice:
+--   1. RLS on with zero policies -- every row is filtered out for anon.
+--   2. Grants revoked -- anon lacks table privileges in the first place, so a
+--      carelessly permissive policy added later cannot by itself open a table.
+-- Consequence of (2): granting public read someday takes a policy AND a
+-- re-GRANT. A policy on its own will still return 401.
+
+ALTER TABLE public.players  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.seasons  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.matches  ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.players, public.seasons, public.sessions, public.matches
+  FROM anon, authenticated;

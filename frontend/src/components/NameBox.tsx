@@ -50,7 +50,7 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
   const label = [
     candidate.name,
     candidate.checked_in ? "checked in" : "not here yet",
-    candidate.challenging && "wants a harder game",
+    candidate.challenging && "wants a stronger match",
     candidate.group && `paired, group ${candidate.group}`,
   ]
     .filter(Boolean)
@@ -93,7 +93,7 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
       )}
       <span className="nb-name">{candidate.name}</span>
       <span className="nb-meta">
-        {candidate.challenging && <span className="nb-challenge">⚡ Challenge</span>}
+        {candidate.challenging && <span className="nb-challenge">Challenge</span>}
         {candidate.group && (
           <span
             className="group-tag"
@@ -103,7 +103,7 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
           </span>
         )}
         {!candidate.challenging && !candidate.group && (
-          <span>{candidate.checked_in ? "In" : "Tap to join"}</span>
+          <span>{candidate.checked_in ? "Checked in" : "Tap to check in"}</span>
         )}
       </span>
     </button>

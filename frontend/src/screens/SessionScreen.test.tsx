@@ -136,18 +136,18 @@ describe("SessionScreen", () => {
 
   it("says what it is doing while the solver runs", () => {
     renderScreen(makeSession(), true);
-    expect(screen.getByText(/Working out courts/)).toBeInTheDocument();
+    expect(screen.getByText(/Generating round/)).toBeInTheDocument();
   });
 
   it("collects games from other rounds that still need a result", () => {
     renderScreen();
-    const section = screen.getByText("Still need a result").closest("section")!;
+    const section = screen.getByText("Awaiting results").closest("section")!;
     expect(within(section).getByText("Round 1 · Court 1")).toBeInTheDocument();
   });
 
   it("records a result for a game from an earlier round", async () => {
     renderScreen();
-    const section = screen.getByText("Still need a result").closest("section")!;
+    const section = screen.getByText("Awaiting results").closest("section")!;
     fireEvent.click(within(section).getByRole("button", { name: /Alice and Bob/ }));
 
     // Round index 0, not the round on screen.

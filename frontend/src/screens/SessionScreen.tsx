@@ -100,7 +100,7 @@ export function SessionScreen({ session, error, busy, run, onBack }: Props) {
               disabled={busy}
               onClick={() => run(() => api.nextRound(session.name), { blocking: true })}
             >
-              {busy ? "Working out courts…" : "Next round ▶"}
+              {busy ? "Generating round…" : "Next round ▶"}
             </button>
           ) : (
             <button
@@ -138,7 +138,7 @@ export function SessionScreen({ session, error, busy, run, onBack }: Props) {
         {unentered.length > 0 && (
           <section className="section" style={{ marginTop: 26 }}>
             <div className="section-head">
-              <h2>Still need a result</h2>
+              <h2>Awaiting results</h2>
             </div>
             <div className="courts">
               {unentered.map(({ roundIndex, round: r, match }) => (
@@ -155,7 +155,7 @@ export function SessionScreen({ session, error, busy, run, onBack }: Props) {
 
         <section className="section" style={{ marginTop: 26 }}>
           <div className="section-head">
-            <h2>Tonight</h2>
+            <h2>Standings</h2>
           </div>
           <table className="standings">
             <thead>
@@ -198,7 +198,7 @@ function CourtCard({
     <div className="court">
       <div className="court-head">
         <span>{label ?? `Court ${match.court}`}</span>
-        {match.winner === null && <span>Tap the winners</span>}
+        {match.winner === null && <span>Tap the winning side</span>}
       </div>
       <Side
         players={match.team_1}
@@ -241,7 +241,7 @@ function Side({
           {player}
         </span>
       ))}
-      {locked && <span className="lock">🔗 Paired</span>}
+      {locked && <span className="lock">Paired</span>}
     </button>
   );
 }

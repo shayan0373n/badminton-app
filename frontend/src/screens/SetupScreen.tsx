@@ -82,7 +82,7 @@ export function SetupScreen({ onOpen }: Props) {
   return (
     <div className="app">
       <header className="topbar">
-        <h1>🏸 Badminton Club Night</h1>
+        <h1>IranFin Badminton Club Night</h1>
       </header>
 
       <div className="content">
@@ -92,7 +92,7 @@ export function SetupScreen({ onOpen }: Props) {
         {sessions.length > 0 && (
           <section className="section">
             <div className="section-head">
-              <h2>Pick up where you left off</h2>
+              <h2>Active sessions</h2>
             </div>
             {sessions.map((s) => (
               <div className="session-card" key={s.name}>
@@ -113,12 +113,12 @@ export function SetupScreen({ onOpen }: Props) {
 
         <section className="section">
           <div className="section-head">
-            <h2>New night</h2>
-            <span className="count-pill">{selected.size} invited</span>
+            <h2>New session</h2>
+            <span className="count-pill">{selected.size} selected</span>
           </div>
 
           <label className="field">
-            <span>Name</span>
+            <span>Session name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -128,7 +128,7 @@ export function SetupScreen({ onOpen }: Props) {
 
           <div className="row" style={{ marginBottom: 12 }}>
             <label className="field" style={{ marginBottom: 0 }}>
-              <span>Courts booked</span>
+              <span>Courts</span>
               <input
                 type="number"
                 min={1}
@@ -138,19 +138,19 @@ export function SetupScreen({ onOpen }: Props) {
               />
             </label>
             <label className="field" style={{ marginBottom: 0 }}>
-              <span>Count for ratings</span>
+              <span>Record to ratings</span>
               <select
                 value={recorded ? "yes" : "no"}
                 onChange={(e) => setRecorded(e.target.value === "yes")}
               >
                 <option value="yes">Yes</option>
-                <option value="no">No, casual</option>
+                <option value="no">No</option>
               </select>
             </label>
           </div>
 
           <label className="field">
-            <span>Who might come?</span>
+            <span>Expected players</span>
             <input
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -169,7 +169,7 @@ export function SetupScreen({ onOpen }: Props) {
               >
                 <span className="nb-name">{player.name}</span>
                 <span className="nb-meta">
-                  {selected.has(player.name) ? "Invited" : "Tap to invite"}
+                  {selected.has(player.name) ? "Selected" : "Tap to select"}
                 </span>
               </button>
             ))}
@@ -177,7 +177,7 @@ export function SetupScreen({ onOpen }: Props) {
 
           {registry.length === 0 && !loading && (
             <p className="empty">
-              No members in the registry yet. Add them in the database first.
+              No members in the registry. Add them to the database first.
             </p>
           )}
 
@@ -186,7 +186,7 @@ export function SetupScreen({ onOpen }: Props) {
             disabled={busy || selected.size === 0}
             onClick={create}
           >
-            {selected.size === 0 ? "Invite some players first" : "Open check-in"}
+            {selected.size === 0 ? "Select at least one player" : "Open check-in"}
           </button>
         </section>
       </div>
@@ -194,14 +194,9 @@ export function SetupScreen({ onOpen }: Props) {
   );
 }
 
-const WORDS = [
-  "Phoenix", "Dragon", "Tiger", "Eagle", "Falcon", "Hawk", "Wolf", "Lion",
-  "Thunder", "Storm", "Comet", "Aurora", "Titan", "Atlas", "Orion", "Nova",
-];
-
-/** A memorable default so nobody has to invent a name at the door. */
+/** Dated by default, so sessions sort and nobody has to invent a name at the door. */
 function defaultName(): string {
-  const word = WORDS[new Date().getDate() % WORDS.length];
-  const stamp = new Date().toISOString().slice(5, 10).replace("-", "");
-  return `${word}-${stamp}`;
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return `Club-night-${local.toISOString().slice(0, 10)}`;
 }

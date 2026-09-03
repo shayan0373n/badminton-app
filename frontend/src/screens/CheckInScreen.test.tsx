@@ -83,7 +83,7 @@ describe("CheckInScreen", () => {
   it("announces challenge and group state to screen readers", () => {
     renderScreen();
 
-    expect(box("Cara")).toHaveAccessibleName(/wants a harder game/);
+    expect(box("Cara")).toHaveAccessibleName(/wants a stronger match/);
     expect(box("Dan")).toHaveAccessibleName(/paired, group G1/);
   });
 
@@ -173,13 +173,13 @@ describe("CheckInScreen", () => {
   it("counts how many courts the turnout fills", () => {
     renderScreen();
     // Three checked in, doubles: not enough for a court yet.
-    expect(screen.getByText(/3 in · 0 courts/)).toBeInTheDocument();
+    expect(screen.getByText(/3 checked in · 0 courts/)).toBeInTheDocument();
   });
 
   it("blocks Start until a court can be filled", () => {
     renderScreen();
     expect(
-      screen.getByRole("button", { name: /Need 1 more to fill a court/ }),
+      screen.getByRole("button", { name: /1 more needed to fill a court/ }),
     ).toBeDisabled();
   });
 
@@ -216,14 +216,14 @@ describe("CheckInScreen", () => {
     });
     renderScreen(session);
 
-    expect(screen.getByRole("button", { name: /Back to the courts/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Back to courts/ })).toBeEnabled();
   });
 
   it("lists groups and can break them up", async () => {
     renderScreen();
 
     expect(screen.getByText("Dan + Eve")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Break up Dan and Eve/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Unpair Dan and Eve/ }));
 
     await waitFor(() => expect(api.dissolveGroup).toHaveBeenCalledWith("Night", "G1"));
   });
@@ -235,6 +235,6 @@ describe("CheckInScreen", () => {
 
   it("warns when the session is not counting toward ratings", () => {
     renderScreen(makeSession({ is_recorded: false }));
-    expect(screen.getByText(/not being recorded/)).toBeInTheDocument();
+    expect(screen.getByText(/not recorded to the ratings database/)).toBeInTheDocument();
   });
 });

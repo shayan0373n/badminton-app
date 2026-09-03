@@ -86,7 +86,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         </button>
         <h1>{session.name}</h1>
         <span className="count-pill">
-          {checkedIn.length} in · {courtsFilled}{" "}
+          {checkedIn.length} checked in · {courtsFilled}{" "}
           {courtsFilled === 1 ? "court" : "courts"}
         </span>
         <button
@@ -103,7 +103,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
 
         {!session.is_recorded && (
           <div className="banner banner-warn">
-            This session is not being recorded to the dataset.
+            This session is not recorded to the ratings database.
           </div>
         )}
 
@@ -114,8 +114,8 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         )}
 
         <p className="hint">
-          Tap your name to check in. Press and hold to check in wanting a harder
-          game. Drag one name onto another to play together.
+          Tap your name to check in. Press and hold to request a stronger match.
+          Drag one name onto another to play as a pair.
         </p>
 
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -137,7 +137,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
               ))}
             </div>
             {session.candidates.length === 0 && (
-              <p className="empty">Nobody on tonight's list yet. Add players from the menu.</p>
+              <p className="empty">No players on the list. Add them from the menu.</p>
             )}
           </section>
         </DndContext>
@@ -145,7 +145,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         {session.groups.length > 0 && (
           <section className="section">
             <div className="section-head">
-              <h2>Playing together</h2>
+              <h2>Pairs</h2>
             </div>
             {session.groups.map((group) => (
               <div
@@ -159,9 +159,9 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
                   onClick={() =>
                     run(() => api.dissolveGroup(name, group.name), { blocking: true })
                   }
-                  aria-label={`Break up ${group.members.join(" and ")}`}
+                  aria-label={`Unpair ${group.members.join(" and ")}`}
                 >
-                  Break up
+                  Unpair
                 </button>
               </div>
             ))}
@@ -174,9 +174,9 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
           onClick={onStart}
         >
           {checkedIn.length < perCourt
-            ? `Need ${perCourt - checkedIn.length} more to fill a court`
+            ? `${perCourt - checkedIn.length} more needed to fill a court`
             : started
-              ? "Back to the courts"
+              ? "Back to courts"
               : "Start playing"}
         </button>
       </div>

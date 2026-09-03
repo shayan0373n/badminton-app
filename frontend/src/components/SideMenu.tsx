@@ -71,7 +71,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
       <button className="scrim" onClick={onClose} aria-label="Close menu" />
       <aside className="drawer" role="dialog" aria-label="Session menu">
         <div className="row" style={{ marginBottom: 16 }}>
-          <h2 style={{ flex: 3 }}>Manage night</h2>
+          <h2 style={{ flex: 3 }}>Manage session</h2>
           <button className="btn btn-icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -140,7 +140,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               </label>
             ))}
           </div>
-          <p className="hint">Higher matters more. Applies from the next round.</p>
+          <p className="hint">Higher values weigh more. Applies from the next round.</p>
         </section>
 
         <section className="section">
@@ -153,7 +153,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               onChange={(e) => setToAdd(e.target.value)}
               aria-label="Registry member"
             >
-              <option value="">Choose a member…</option>
+              <option value="">Select a member…</option>
               {available.map((p) => (
                 <option key={p.name} value={p.name}>
                   {p.name}
@@ -175,7 +175,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
 
         <section className="section">
           <div className="section-head">
-            <h2>New guest</h2>
+            <h2>Add guest</h2>
           </div>
           <div className="stack">
             <input
@@ -227,7 +227,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
 
         <section className="section">
           <div className="section-head">
-            <h2>Remove from tonight</h2>
+            <h2>Remove players</h2>
           </div>
           <div className="stack">
             {session.candidates.map((c) => (
@@ -237,7 +237,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
                   className="btn btn-danger btn-icon"
                   disabled={busy}
                   onClick={() => run(() => api.removeCandidate(name, c.name), { blocking: true })}
-                  aria-label={`Remove ${c.name} from tonight`}
+                  aria-label={`Remove ${c.name} from this session`}
                 >
                   Remove
                 </button>
@@ -255,14 +255,14 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               Upload results to database
             </button>
             {session.results_dirty && (
-              <p className="hint">There are results that haven't been uploaded yet.</p>
+              <p className="hint">Some results have not been uploaded.</p>
             )}
           </section>
         )}
 
         <section className="section">
           <div className="section-head">
-            <h2>End the night</h2>
+            <h2>End session</h2>
           </div>
           {confirmEnd ? (
             <div className="stack">
@@ -278,7 +278,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
                   onExit();
                 }}
               >
-                Yes, end and discard this session
+                End and discard this session
               </button>
               <button className="btn" onClick={() => setConfirmEnd(false)}>
                 Cancel

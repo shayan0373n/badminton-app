@@ -82,12 +82,12 @@ def check_in_all(client, name="Night", players=None) -> dict:
 # =============================================================================
 
 
-def test_list_players_sorted_by_rating(client):
+def test_list_players_sorted_by_name(client):
     players = client.get("/api/players").json()["players"]
 
     assert len(players) == len(REGISTRY_MU)
-    ratings = [p["rating"] for p in players]
-    assert ratings == sorted(ratings, reverse=True)
+    names = [p["name"] for p in players]
+    assert names == sorted(names, key=str.casefold)
 
 
 # =============================================================================
@@ -232,13 +232,14 @@ def test_pairing_two_players_creates_a_group(client):
     assert len(snapshot["groups"]) == 1
     assert snapshot["groups"][0]["members"] == ["Alice", "Bob"]
     assert all(
-        c["group"] == snapshot["groups"][0]["name"]
+        c["groups"] == [snapshot["groups"][0]["name"]]
         for c in snapshot["candidates"]
         if c["name"] in {"Alice", "Bob"}
     )
 
 
-def test_dragging_a_third_player_grows_the_group(client):
+def test_dragging_a_third_player_makes_a_second_pair(client):
+    """A pair is always two people, so Alice ends up in two of them."""
     create(client)
     check_in_all(client, players=["Alice", "Bob", "Charlie"])
     client.post("/api/sessions/Night/groups", json={"first": "Alice", "second": "Bob"})
@@ -247,11 +248,16 @@ def test_dragging_a_third_player_grows_the_group(client):
         "/api/sessions/Night/groups", json={"first": "Charlie", "second": "Alice"}
     ).json()
 
-    assert len(snapshot["groups"]) == 1
-    assert snapshot["groups"][0]["members"] == ["Alice", "Bob", "Charlie"]
+    assert [g["members"] for g in snapshot["groups"]] == [
+        ["Alice", "Bob"],
+        ["Alice", "Charlie"],
+    ]
+    by_name = {c["name"]: c for c in snapshot["candidates"]}
+    assert len(by_name["Alice"]["groups"]) == 2
+    assert len(by_name["Bob"]["groups"]) == 1
 
 
-def test_pairing_two_groups_merges_them(client):
+def test_pairing_across_two_groups_does_not_merge_them(client):
     create(client)
     check_in_all(client, players=["Alice", "Bob", "Charlie", "Dave"])
     client.post("/api/sessions/Night/groups", json={"first": "Alice", "second": "Bob"})
@@ -261,8 +267,39 @@ def test_pairing_two_groups_merges_them(client):
         "/api/sessions/Night/groups", json={"first": "Bob", "second": "Charlie"}
     ).json()
 
+    assert [g["members"] for g in snapshot["groups"]] == [
+        ["Alice", "Bob"],
+        ["Charlie", "Dave"],
+        ["Bob", "Charlie"],
+    ]
+
+
+def test_pairing_the_same_two_again_is_a_no_op(client):
+    create(client)
+    check_in_all(client, players=["Alice", "Bob"])
+    client.post("/api/sessions/Night/groups", json={"first": "Alice", "second": "Bob"})
+
+    snapshot = client.post(
+        "/api/sessions/Night/groups", json={"first": "Bob", "second": "Alice"}
+    ).json()
+
     assert len(snapshot["groups"]) == 1
-    assert snapshot["groups"][0]["members"] == ["Alice", "Bob", "Charlie", "Dave"]
+
+
+def test_dissolving_one_pair_leaves_the_others(client):
+    create(client)
+    check_in_all(client, players=["Alice", "Bob", "Charlie"])
+    first = client.post(
+        "/api/sessions/Night/groups", json={"first": "Alice", "second": "Bob"}
+    ).json()["groups"][0]["name"]
+    client.post("/api/sessions/Night/groups", json={"first": "Alice", "second": "Charlie"})
+
+    snapshot = client.delete(f"/api/sessions/Night/groups/{first}").json()
+
+    assert [g["members"] for g in snapshot["groups"]] == [["Alice", "Charlie"]]
+    by_name = {c["name"]: c for c in snapshot["candidates"]}
+    assert len(by_name["Alice"]["groups"]) == 1
+    assert by_name["Bob"]["groups"] == []
 
 
 def test_pairing_requires_both_checked_in(client):
@@ -293,8 +330,8 @@ def test_removing_one_member_leaves_the_rest_paired(client):
 
     snapshot = client.delete("/api/sessions/Night/groups/members/Charlie").json()
 
-    assert snapshot["groups"][0]["members"] == ["Alice", "Bob"]
-    assert next(c for c in snapshot["candidates"] if c["name"] == "Charlie")["group"] is None
+    assert [g["members"] for g in snapshot["groups"]] == [["Alice", "Bob"]]
+    assert next(c for c in snapshot["candidates"] if c["name"] == "Charlie")["groups"] == []
 
 
 def test_dissolving_a_group_frees_everyone(client):
@@ -307,7 +344,7 @@ def test_dissolving_a_group_frees_everyone(client):
     snapshot = client.delete(f"/api/sessions/Night/groups/{group}").json()
 
     assert snapshot["groups"] == []
-    assert all(c["group"] is None for c in snapshot["candidates"])
+    assert all(c["groups"] == [] for c in snapshot["candidates"])
 
 
 def test_a_group_of_one_is_not_reported(client):

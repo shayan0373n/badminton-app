@@ -36,10 +36,10 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     results_dirty: false,
     queued_removals: [],
     candidates: [
-      { name: "Alice", gender: "F", checked_in: false, challenging: false, group: null },
-      { name: "Bob", gender: "M", checked_in: true, challenging: false, group: null },
-      { name: "Cara", gender: "F", checked_in: true, challenging: true, group: null },
-      { name: "Dan", gender: "M", checked_in: true, challenging: false, group: "G1" },
+      { name: "Alice", gender: "F", checked_in: false, challenging: false, groups: [] },
+      { name: "Bob", gender: "M", checked_in: true, challenging: false, groups: [] },
+      { name: "Cara", gender: "F", checked_in: true, challenging: true, groups: [] },
+      { name: "Dan", gender: "M", checked_in: true, challenging: false, groups: ["G1"] },
     ],
     groups: [{ name: "G1", members: ["Dan", "Eve"] }],
     rounds: [],
@@ -84,7 +84,7 @@ describe("CheckInScreen", () => {
     renderScreen();
 
     expect(box("Cara")).toHaveAccessibleName(/wants a stronger match/);
-    expect(box("Dan")).toHaveAccessibleName(/paired, group G1/);
+    expect(box("Dan")).toHaveAccessibleName(/paired: G1/);
   });
 
   it("checks a player in when tapped", async () => {
@@ -179,7 +179,7 @@ describe("CheckInScreen", () => {
   it("blocks Start until a court can be filled", () => {
     renderScreen();
     expect(
-      screen.getByRole("button", { name: /1 more needed to fill a court/ }),
+      screen.getByRole("button", { name: /1 more for a court/ }),
     ).toBeDisabled();
   });
 
@@ -190,7 +190,7 @@ describe("CheckInScreen", () => {
         gender: "M" as const,
         checked_in: true,
         challenging: false,
-        group: null,
+        groups: [],
       })),
       groups: [],
     });
@@ -210,7 +210,7 @@ describe("CheckInScreen", () => {
         gender: "M" as const,
         checked_in: true,
         challenging: false,
-        group: null,
+        groups: [],
       })),
       groups: [],
     });
@@ -235,6 +235,6 @@ describe("CheckInScreen", () => {
 
   it("warns when the session is not counting toward ratings", () => {
     renderScreen(makeSession({ is_recorded: false }));
-    expect(screen.getByText(/not recorded to the ratings database/)).toBeInTheDocument();
+    expect(screen.getByText(/Not recorded to ratings/)).toBeInTheDocument();
   });
 });

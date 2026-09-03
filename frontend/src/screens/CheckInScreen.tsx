@@ -50,7 +50,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         optimistic: (s) =>
           withCandidate(s, playerName, {
             checked_in: !isIn,
-            ...(isIn ? { challenging: false, group: null } : {}),
+            ...(isIn ? { challenging: false, groups: [] } : {}),
           }),
       },
     );
@@ -103,7 +103,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
 
         {!session.is_recorded && (
           <div className="banner banner-warn">
-            This session is not recorded to the ratings database.
+            Not recorded to ratings.
           </div>
         )}
 
@@ -114,8 +114,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         )}
 
         <p className="hint">
-          Tap your name to check in. Press and hold to request a stronger match.
-          Drag one name onto another to play as a pair.
+          Tap to check in · Hold for a stronger match · Drag onto a name to pair
         </p>
 
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -137,7 +136,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
               ))}
             </div>
             {session.candidates.length === 0 && (
-              <p className="empty">No players on the list. Add them from the menu.</p>
+              <p className="empty">No players yet.</p>
             )}
           </section>
         </DndContext>
@@ -168,17 +167,19 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
           </section>
         )}
 
-        <button
-          className="btn btn-primary btn-lg"
-          disabled={busy || checkedIn.length < perCourt}
-          onClick={onStart}
-        >
-          {checkedIn.length < perCourt
-            ? `${perCourt - checkedIn.length} more needed to fill a court`
-            : started
-              ? "Back to courts"
-              : "Start playing"}
-        </button>
+        <div className="cta-sticky">
+          <button
+            className="btn btn-primary btn-lg"
+            disabled={busy || checkedIn.length < perCourt}
+            onClick={onStart}
+          >
+            {checkedIn.length < perCourt
+              ? `${perCourt - checkedIn.length} more for a court`
+              : started
+                ? "Back to courts"
+                : "Start playing"}
+          </button>
+        </div>
       </div>
 
       {menuOpen && (

@@ -239,13 +239,19 @@ button {
   gap: 4px;
   text-align: left;
   overflow: hidden;
-  touch-action: none;
   user-select: none;
   transition:
     transform 0.08s ease,
     border-color 0.12s ease,
     background 0.12s ease,
     box-shadow 0.12s ease;
+}
+
+/* Only the check-in cards carry drag and long press, and only they need the
+   browser to keep its hands off the gesture. Setup's selection tiles reuse the
+   look but not the gestures, so a touch that starts on one still scrolls. */
+.namebox.gestures {
+  touch-action: none;
 }
 
 .namebox:active {
@@ -264,8 +270,15 @@ button {
   box-shadow: inset 0 0 0 1px var(--challenge);
 }
 
+/* Lifted, not faded: the card is under the cursor, so it has to stay readable
+   and stay above the cards it is being dragged across. */
 .namebox.dragging {
-  opacity: 0.35;
+  opacity: 0.9;
+  z-index: 30;
+  box-shadow:
+    0 8px 20px rgba(20, 23, 26, 0.22),
+    inset 0 0 0 1px var(--accent);
+  border-color: var(--accent);
 }
 
 .namebox.drop-target {
@@ -424,19 +437,24 @@ button {
   overflow: hidden;
 }
 
+/* The court number is how a player finds their game from across the hall, so it
+   reads as a heading rather than a caption. */
 .court-head {
-  padding: 11px 18px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--rule);
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 1.375rem;
+  letter-spacing: -0.015em;
   color: var(--ink);
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
 }
 
 .court-head span:last-child:not(:only-child) {
   color: var(--ink-3);
+  font-size: 0.9375rem;
   font-weight: 450;
 }
 
@@ -617,6 +635,51 @@ input::placeholder {
   gap: 8px;
 }
 
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepper .btn {
+  flex: none;
+  width: var(--tap-min);
+  min-height: var(--tap-min);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+/* The roster is hundreds of names long, so the action that ends the screen has
+   to stay in reach instead of sitting under all of them. */
+.cta-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  padding: 12px 0;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  margin-top: 4px;
+  background: var(--ground);
+  border-top: 1px solid var(--rule);
+}
+
+.segmented {
+  display: flex;
+  gap: 8px;
+}
+
+.segmented .btn {
+  flex: 1;
+}
+
+.stepper-value {
+  flex: none;
+  min-width: 64px;
+  text-align: center;
+  font-size: 1.375rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Banners ---------- */
 
 .banner {
@@ -646,18 +709,21 @@ input::placeholder {
   color: var(--ink);
 }
 
+/* Sitting out is something you check from your seat, so it carries roughly the
+   weight of a court number rather than of a footnote. */
 .resting {
-  padding: 11px 18px;
+  padding: 13px 18px;
   border-radius: var(--radius);
   background: var(--surface-2);
-  color: var(--ink-2);
-  font-size: 1rem;
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1.4;
   margin-bottom: 16px;
 }
 
 .resting b {
-  color: var(--ink);
-  font-weight: 550;
+  color: var(--ink-2);
+  font-weight: 600;
 }
 
 /* ---------- Session list ---------- */

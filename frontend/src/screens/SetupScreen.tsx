@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { Stepper } from "../components/Stepper";
 import type { RegistryPlayer, Session, SessionSummary } from "../types";
 
 interface Props {
@@ -20,7 +21,7 @@ export function SetupScreen({ onOpen }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [name, setName] = useState("");
-  const [courts, setCourts] = useState("2");
+  const [courts, setCourts] = useState(2);
   const [recorded, setRecorded] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -35,6 +36,17 @@ export function SetupScreen({ onOpen }: Props) {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load."))
       .finally(() => setLoading(false));
   }, []);
+
+  // Shown as the placeholder and used verbatim on create, so the name the user
+  // sees is the one that gets sent.
+  const suggestedName = useMemo(() => {
+    const taken = new Set(sessions.map((s) => s.name));
+    const base = dateName();
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base}-${n}`)) n += 1;
+    return `${base}-${n}`;
+  }, [sessions]);
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -56,9 +68,9 @@ export function SetupScreen({ onOpen }: Props) {
     setBusy(true);
     try {
       const session = await api.createSession({
-        name: name.trim() || defaultName(),
+        name: name.trim() || suggestedName,
         candidates: [...selected],
-        num_courts: Number(courts),
+        num_courts: courts,
         is_doubles: true,
         is_recorded: recorded,
       });
@@ -122,31 +134,31 @@ export function SetupScreen({ onOpen }: Props) {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={defaultName()}
+              placeholder={suggestedName}
             />
           </label>
 
           <div className="row" style={{ marginBottom: 12 }}>
-            <label className="field" style={{ marginBottom: 0 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
               <span>Courts</span>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={courts}
-                onChange={(e) => setCourts(e.target.value)}
-              />
-            </label>
-            <label className="field" style={{ marginBottom: 0 }}>
+              <Stepper value={courts} onChange={setCourts} min={1} max={20} label="courts" />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
               <span>Record to ratings</span>
-              <select
-                value={recorded ? "yes" : "no"}
-                onChange={(e) => setRecorded(e.target.value === "yes")}
-              >
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </label>
+              <div className="segmented" role="group" aria-label="Record to ratings">
+                {[true, false].map((choice) => (
+                  <button
+                    key={String(choice)}
+                    type="button"
+                    className={recorded === choice ? "btn btn-primary" : "btn"}
+                    onClick={() => setRecorded(choice)}
+                    aria-pressed={recorded === choice}
+                  >
+                    {choice ? "Yes" : "No"}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <label className="field">
@@ -177,17 +189,21 @@ export function SetupScreen({ onOpen }: Props) {
 
           {registry.length === 0 && !loading && (
             <p className="empty">
-              No members in the registry. Add them to the database first.
+              Registry is empty.
             </p>
           )}
 
-          <button
-            className="btn btn-primary btn-lg"
-            disabled={busy || selected.size === 0}
-            onClick={create}
-          >
-            {selected.size === 0 ? "Select at least one player" : "Open check-in"}
-          </button>
+          <div className="cta-sticky">
+            <button
+              className="btn btn-primary btn-lg"
+              disabled={busy || selected.size === 0}
+              onClick={create}
+            >
+              {selected.size === 0
+                ? "Select players"
+                : `Open check-in with ${selected.size}`}
+            </button>
+          </div>
         </section>
       </div>
     </div>
@@ -195,7 +211,7 @@ export function SetupScreen({ onOpen }: Props) {
 }
 
 /** Dated by default, so sessions sort and nobody has to invent a name at the door. */
-function defaultName(): string {
+function dateName(): string {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return `Club-night-${local.toISOString().slice(0, 10)}`;

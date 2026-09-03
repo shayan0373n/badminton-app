@@ -11,7 +11,7 @@ export interface Candidate {
   gender: "M" | "F";
   checked_in: boolean;
   challenging: boolean;
-  group: string | null;
+  groups: string[];
 }
 
 export interface Group {

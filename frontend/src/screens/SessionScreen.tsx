@@ -131,7 +131,7 @@ export function SessionScreen({ session, error, busy, run, onBack }: Props) {
 
         {round.matches.length === 0 && (
           <p className="empty">
-            No courts could be formed with the players currently checked in.
+            Not enough players for a court.
           </p>
         )}
 
@@ -198,7 +198,7 @@ function CourtCard({
     <div className="court">
       <div className="court-head">
         <span>{label ?? `Court ${match.court}`}</span>
-        {match.winner === null && <span>Tap the winning side</span>}
+        {match.winner === null && <span>Tap the winner</span>}
       </div>
       <Side
         players={match.team_1}

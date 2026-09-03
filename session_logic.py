@@ -368,55 +368,62 @@ class ClubNightSession:
             i += 1
         return f"G{i}"
 
+    def _memberships(self, name: PlayerName) -> list[str]:
+        """Returns the group names a player carries, in the order they joined."""
+        return [team.strip() for team in self.teams.get(name, "").split(",") if team.strip()]
+
     def group_of(self, name: PlayerName) -> str | None:
-        """Returns the group a player belongs to, or None."""
+        """Returns the first group a player belongs to, or None."""
         for group_name, members in self.get_groups().items():
             if name in members:
                 return group_name
         return None
 
     def pair_players(self, first: PlayerName, second: PlayerName) -> str | None:
-        """Puts two players in the same group, merging existing groups if needed.
+        """Pairs two players, leaving any pairs either already has intact.
 
-        Dragging one name onto another is the only way this is reached, so the
-        two are joined into a single group rather than accumulating memberships.
+        A pair is always exactly two people. Dragging C onto A when A is already
+        with B gives A a second pair rather than a threesome, which the optimizer
+        reads as "A partners B or C" -- a partner constraint only makes sense
+        between two players, and A is free to honour either one in a given round.
 
         Returns:
-            The resulting group name, or None if either player is not checked in
-            or the two are the same person.
+            The group name, or None if either player is not checked in or the
+            two are the same person.
         """
         if first == second:
             return None
         if first not in self.player_pool or second not in self.player_pool:
             return None
 
-        group = self.group_of(first) or self.group_of(second) or self._next_group_name()
+        # Dragging the same two together twice is a no-op, not a duplicate pair.
+        shared = set(self._memberships(first)) & set(self._memberships(second))
+        if shared:
+            return sorted(shared)[0]
 
-        # Absorb the other player's group wholesale so nobody is silently orphaned.
-        members = {first, second}
+        group = self._next_group_name()
         for player in (first, second):
-            other = self.group_of(player)
-            if other and other != group:
-                members.update(self.get_groups().get(other, []))
-
-        for player in members:
-            self.teams[player] = group
+            self.teams[player] = ",".join([*self._memberships(player), group])
         return group
 
     def unpair_player(self, name: PlayerName) -> bool:
-        """Removes a player from their group. Returns True if they were in one."""
+        """Removes a player from every group they are in. Returns True if any."""
         if self.group_of(name) is None:
             return False
         self.teams.pop(name, None)
         return True
 
     def dissolve_group(self, group_name: str) -> bool:
-        """Breaks up a whole group. Returns True if it existed."""
+        """Breaks up one group, leaving its members' other pairs alone."""
         members = self.get_groups().get(group_name)
         if not members:
             return False
         for member in members:
-            self.teams.pop(member, None)
+            remaining = [g for g in self._memberships(member) if g != group_name]
+            if remaining:
+                self.teams[member] = ",".join(remaining)
+            else:
+                self.teams.pop(member, None)
         return True
 
     def prepare_round(self) -> None:

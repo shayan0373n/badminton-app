@@ -8,6 +8,7 @@ the operation is initiated (UI or Tests).
 """
 
 import logging
+from collections import defaultdict
 
 from database import MatchDB, PlayerDB, SessionDB
 from exceptions import DatabaseError
@@ -436,7 +437,12 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
     in one place -- the client renders this and never recomputes any of it.
     """
     groups = session.get_groups()
-    group_of = {member: name for name, members in groups.items() for member in members}
+    # A player can be in several pairs at once, so this is a list, not a lookup
+    # of one name -- collapsing it would hide every pair but the last.
+    groups_of: dict[str, list[str]] = defaultdict(list)
+    for group_name, members in sorted(groups.items()):
+        for member in members:
+            groups_of[member].append(group_name)
     locked_pairs = {
         tuple(sorted((player, partner)))
         for player, partners in session.get_required_partners().items()
@@ -485,7 +491,7 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
                 "gender": player.gender.value,
                 "checked_in": name in session.player_pool,
                 "challenging": name in session.challengers,
-                "group": group_of.get(name),
+                "groups": groups_of.get(name, []),
             }
             for name, player in sorted(session.candidates.items())
         ],

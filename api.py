@@ -155,7 +155,7 @@ SessionName = Annotated[str, Path(min_length=1, max_length=80)]
 
 @app.get("/api/players")
 async def list_players() -> dict[str, Any]:
-    """Returns the member registry, strongest first."""
+    """Returns the member registry in name order, so people can be found by name."""
     try:
         registry = await run_blocking(PlayerDB.get_all_players)
     except DatabaseError as e:
@@ -174,8 +174,7 @@ async def list_players() -> dict[str, Any]:
                 }
                 for p in registry.values()
             ),
-            key=lambda p: p["rating"] if p["rating"] is not None else float("-inf"),
-            reverse=True,
+            key=lambda p: p["name"].casefold(),
         )
     }
 

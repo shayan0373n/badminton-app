@@ -6,9 +6,20 @@
  * playing screen can stay free of controls.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { Stepper } from "./Stepper";
 import type { RegistryPlayer, Session } from "../types";
+
+/** How many names the drawer will list before it insists on a search. */
+const REGISTRY_LIST_MAX = 12;
+
+/** Optimizer keys paired with what they mean to whoever is running the night. */
+const WEIGHT_LABELS = [
+  ["skill", "Even courts"],
+  ["power", "Even teams"],
+  ["pairing", "Vary partners"],
+] as const;
 
 interface Props {
   session: Session;
@@ -23,16 +34,20 @@ interface Props {
 
 export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
   const [registry, setRegistry] = useState<RegistryPlayer[]>([]);
-  const [toAdd, setToAdd] = useState("");
+  const [registryFilter, setRegistryFilter] = useState("");
   const [guestName, setGuestName] = useState("");
   const [guestGender, setGuestGender] = useState<"M" | "F">("M");
   const [guestMu, setGuestMu] = useState("25");
-  const [courts, setCourts] = useState(String(session.num_courts));
+  const [courts, setCourts] = useState(session.num_courts);
+  const [weights, setWeights] = useState<Record<string, number>>(session.weights);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
   const name = session.name;
   const onList = new Set(session.candidates.map((c) => c.name));
+  const weightsChanged = WEIGHT_LABELS.some(
+    ([key]) => weights[key] !== session.weights[key],
+  );
 
   useEffect(() => {
     api
@@ -48,7 +63,17 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const available = registry.filter((p) => !onList.has(p.name));
+  const available = useMemo(() => {
+    const needle = registryFilter.trim().toLowerCase();
+    const pool = registry.filter((p) => !onList.has(p.name));
+    return needle ? pool.filter((p) => p.name.toLowerCase().includes(needle)) : pool;
+    // onList is rebuilt every render; the candidate names are what actually matter.
+  }, [registry, registryFilter, session.candidates]);
+
+  // The club registry runs to hundreds of names. Listing them all buries the
+  // rest of the drawer, so past a drawer-full you have to narrow it first.
+  const searching = registryFilter.trim().length > 0;
+  const listed = searching || available.length <= REGISTRY_LIST_MAX ? available : [];
 
   async function submitResults() {
     setNotice(null);
@@ -56,9 +81,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
       const result = await api.submit(name);
       setNotice(
         `Uploaded ${result.recorded} match${result.recorded === 1 ? "" : "es"}` +
-          (result.unreported > 0
-            ? `. ${result.unreported} court${result.unreported === 1 ? "" : "s"} had no winner yet.`
-            : "."),
+          (result.unreported > 0 ? ` · ${result.unreported} without a winner` : ""),
       );
       await run(() => api.getSession(name));
     } catch (e) {
@@ -84,19 +107,12 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             <h2>Courts</h2>
           </div>
           <div className="row">
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={courts}
-              onChange={(e) => setCourts(e.target.value)}
-              aria-label="Number of courts"
-            />
+            <Stepper value={courts} onChange={setCourts} min={1} max={20} label="courts" />
             <button
               className="btn"
-              disabled={busy || Number(courts) === session.num_courts}
+              disabled={busy || courts === session.num_courts}
               onClick={() =>
-                run(() => api.updateSettings(name, { num_courts: Number(courts) }), {
+                run(() => api.updateSettings(name, { num_courts: courts }), {
                   blocking: true,
                 })
               }
@@ -104,7 +120,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               Apply
             </button>
           </div>
-          <p className="hint">Takes effect from the next round.</p>
+          <p className="hint">From next round.</p>
         </section>
 
         <section className="section">
@@ -112,64 +128,64 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             <h2>Matchmaking weights</h2>
           </div>
           <div className="stack">
-            {(["skill", "power", "pairing"] as const).map((key) => (
-              <label className="field" key={key}>
-                <span>
-                  {key === "skill"
-                    ? "Even courts"
-                    : key === "power"
-                      ? "Even teams"
-                      : "Vary partners"}
-                </span>
-                <input
-                  type="number"
+            {WEIGHT_LABELS.map(([key, label]) => (
+              <div className="field" key={key} style={{ marginBottom: 0 }}>
+                <span>{label}</span>
+                <Stepper
+                  value={weights[key] ?? 1}
+                  onChange={(next) => setWeights({ ...weights, [key]: next })}
                   min={0}
                   max={10}
                   step={0.5}
-                  defaultValue={session.weights[key] ?? 1}
-                  onBlur={(e) => {
-                    const value = Number(e.target.value);
-                    if (value !== session.weights[key]) {
-                      run(
-                        () => api.updateSettings(name, { weights: { [key]: value } }),
-                        { blocking: true },
-                      );
-                    }
-                  }}
+                  label={label.toLowerCase()}
                 />
-              </label>
+              </div>
             ))}
           </div>
-          <p className="hint">Higher values weigh more. Applies from the next round.</p>
+          <button
+            className="btn"
+            style={{ marginTop: 10 }}
+            disabled={busy || !weightsChanged}
+            onClick={() =>
+              run(() => api.updateSettings(name, { weights }), { blocking: true })
+            }
+          >
+            Apply weights
+          </button>
+          <p className="hint">Higher weighs more. From next round.</p>
         </section>
 
         <section className="section">
           <div className="section-head">
             <h2>Add from registry</h2>
           </div>
-          <div className="row">
-            <select
-              value={toAdd}
-              onChange={(e) => setToAdd(e.target.value)}
-              aria-label="Registry member"
-            >
-              <option value="">Select a member…</option>
-              {available.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <button
-              className="btn"
-              disabled={!toAdd || busy}
-              onClick={async () => {
-                await run(() => api.addCandidate(name, toAdd), { blocking: true });
-                setToAdd("");
-              }}
-            >
-              Add
-            </button>
+          <input
+            value={registryFilter}
+            onChange={(e) => setRegistryFilter(e.target.value)}
+            placeholder="Search members…"
+            aria-label="Search the registry"
+          />
+          <div className="stack" style={{ marginTop: 10 }}>
+            {listed.map((p) => (
+              <div className="row" key={p.name}>
+                <span style={{ flex: 3 }}>{p.name}</span>
+                <button
+                  className="btn btn-icon"
+                  disabled={busy}
+                  onClick={() =>
+                    run(() => api.addCandidate(name, p.name), { blocking: true })
+                  }
+                  aria-label={`Add ${p.name} to this session`}
+                >
+                  Add
+                </button>
+              </div>
+            ))}
+            {/* Nothing is said when the list is merely too long to show: the
+                search box above it is the whole instruction. */}
+            {listed.length === 0 && available.length === 0 && (
+              <p className="empty">{searching ? "No match." : "All added."}</p>
+            )}
           </div>
         </section>
 
@@ -202,7 +218,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               />
             </div>
             <p className="hint">
-              Skill: 18 is intermediate-minus, 25 intermediate, 32 intermediate-plus.
+              Skill: 18 lower · 25 middle · 32 upper.
             </p>
             <button
               className="btn"
@@ -220,7 +236,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
                 setGuestName("");
               }}
             >
-              Create and check in
+              Add and check in
             </button>
           </div>
         </section>
@@ -252,10 +268,10 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               <h2>Results</h2>
             </div>
             <button className="btn btn-lg" onClick={submitResults} disabled={busy}>
-              Upload results to database
+              Upload results
             </button>
             {session.results_dirty && (
-              <p className="hint">Some results have not been uploaded.</p>
+              <p className="hint">Not uploaded yet.</p>
             )}
           </section>
         )}
@@ -268,7 +284,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             <div className="stack">
               {session.results_dirty && (
                 <div className="banner banner-warn">
-                  Some results were never uploaded. Ending now discards them.
+                  Unuploaded results will be lost.
                 </div>
               )}
               <button
@@ -278,7 +294,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
                   onExit();
                 }}
               >
-                End and discard this session
+                End and discard
               </button>
               <button className="btn" onClick={() => setConfirmEnd(false)}>
                 Cancel

@@ -38,9 +38,10 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
 
   const className = [
     "namebox",
+    "gestures",
     candidate.checked_in && "in",
     candidate.challenging && "challenging",
-    candidate.group && "grouped",
+    candidate.groups.length > 0 && "grouped",
     drag.isDragging && "dragging",
     isDropTarget && "drop-target",
   ]
@@ -51,7 +52,7 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
     candidate.name,
     candidate.checked_in ? "checked in" : "not here yet",
     candidate.challenging && "wants a stronger match",
-    candidate.group && `paired, group ${candidate.group}`,
+    candidate.groups.length > 0 && `paired: ${candidate.groups.join(", ")}`,
   ]
     .filter(Boolean)
     .join(", ");
@@ -64,6 +65,16 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
         drop.setNodeRef(node);
       }}
       className={className}
+      // The card has to follow the finger or the cursor. Without it a drag
+      // shows only a fade, which reads as "nothing is happening".
+      style={
+        drag.transform
+          ? {
+              transform: `translate3d(${drag.transform.x}px, ${drag.transform.y}px, 0)`,
+              transition: "none",
+            }
+          : undefined
+      }
       {...drag.attributes}
       {...drag.listeners}
       {...handlers}
@@ -84,25 +95,22 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
       }}
     >
       {pressing && <span className="press-fill" aria-hidden="true" />}
-      {candidate.group && (
+      {candidate.groups.length > 0 && (
         <span
           className="group-stripe"
-          style={{ background: groupColor(candidate.group) }}
+          style={{ background: groupColor(candidate.groups[0]) }}
           aria-hidden="true"
         />
       )}
       <span className="nb-name">{candidate.name}</span>
       <span className="nb-meta">
         {candidate.challenging && <span className="nb-challenge">Challenge</span>}
-        {candidate.group && (
-          <span
-            className="group-tag"
-            style={{ background: groupColor(candidate.group) }}
-          >
-            {candidate.group}
+        {candidate.groups.map((group) => (
+          <span key={group} className="group-tag" style={{ background: groupColor(group) }}>
+            {group}
           </span>
-        )}
-        {!candidate.challenging && !candidate.group && (
+        ))}
+        {!candidate.challenging && candidate.groups.length === 0 && (
           <span>{candidate.checked_in ? "Checked in" : "Tap to check in"}</span>
         )}
       </span>

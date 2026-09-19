@@ -90,6 +90,29 @@ def test_list_players_sorted_by_name(client):
     assert names == sorted(names, key=str.casefold)
 
 
+def test_recalculate_ratings_reports_counts(client, monkeypatch, registry):
+    monkeypatch.setattr(
+        api.season_service, "recalculate_ratings", lambda: (registry, 12)
+    )
+
+    response = client.post("/api/ratings/recalculate")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"players": len(registry), "matches": 12}
+
+
+def test_recalculate_ratings_without_a_season_conflicts(client, monkeypatch):
+    def no_season():
+        raise RuntimeError("No current season found")
+
+    monkeypatch.setattr(api.season_service, "recalculate_ratings", no_season)
+
+    response = client.post("/api/ratings/recalculate")
+
+    assert response.status_code == 409
+    assert "No current season" in response.json()["detail"]
+
+
 # =============================================================================
 # Session lifecycle
 # =============================================================================

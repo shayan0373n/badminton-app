@@ -66,6 +66,9 @@ export const api = {
   savePlayers: (players: Pick<RegistryPlayer, "name" | "gender" | "prior_mu">[]) =>
     request<{ saved: number }>("/players", { ...json({ players }), method: "PUT" }),
 
+  recalculateRatings: () =>
+    request<{ players: number; matches: number }>("/ratings/recalculate", { method: "POST" }),
+
   listSessions: () => request<{ sessions: SessionSummary[] }>("/sessions"),
 
   createSession: (body: {

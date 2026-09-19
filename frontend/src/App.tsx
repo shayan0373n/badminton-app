@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { api } from "./api";
+import { AdminScreen } from "./screens/AdminScreen";
 import { CheckInScreen } from "./screens/CheckInScreen";
 import { SessionScreen } from "./screens/SessionScreen";
 import { SetupScreen } from "./screens/SetupScreen";
@@ -17,6 +18,16 @@ import type { Session } from "./types";
 type Screen = "setup" | "checkin" | "playing";
 
 export default function App() {
+  // The one URL the app honours. It is unlinked on purpose: the admin page is
+  // for the organizer after a night, not something to stumble into at the door.
+  if (window.location.pathname === "/admin") {
+    return <AdminScreen />;
+  }
+
+  return <ClubNight />;
+}
+
+function ClubNight() {
   const [screen, setScreen] = useState<Screen>("setup");
   const { session, setSession, error, setError, busy, run } = useSession();
 

@@ -556,6 +556,26 @@ button {
   text-align: right;
 }
 
+/* Header buttons inherit the cell's look so the table reads the same whether
+   or not it sorts; the mark is the only hint. */
+.sortable th button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.sortable th[aria-sort="ascending"] button,
+.sortable th[aria-sort="descending"] button {
+  color: var(--ink);
+}
+
+.sort-mark {
+  font-size: 0.625rem;
+}
+
 /* ---------- Side menu ---------- */
 
 .scrim {

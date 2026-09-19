@@ -28,6 +28,7 @@ from logger import setup_logging
 setup_logging(app_level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
 import player_service
+import season_service
 import session_service
 from app_types import Gender
 from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, TTT_DEFAULT_MU
@@ -201,6 +202,19 @@ async def save_players(payload: RegistryRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
     return {"saved": len(payload.players)}
+
+
+@app.post("/api/ratings/recalculate")
+async def recalculate_ratings() -> dict[str, Any]:
+    """Rebuilds this season's ratings from match history and writes them back."""
+    try:
+        players, match_count = await run_blocking(season_service.recalculate_ratings)
+    except DatabaseError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except (RuntimeError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+
+    return {"players": len(players), "matches": match_count}
 
 
 # =============================================================================

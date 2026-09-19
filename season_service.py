@@ -1,10 +1,13 @@
 """
-Season rollover service.
+Season rollover and rating recalculation service.
 
 A season is a date window. Rolling a season carries each player's end-of-season
 skill forward as the next season's TTT prior, then opens the new window so that
 new-season ratings are computed from the carried priors plus only the new
 season's matches. Carry-forward and season creation are always one operation.
+
+Recalculation converges the same window without rolling it, writing each
+player's current mu/sigma aged to today.
 """
 
 import logging
@@ -12,7 +15,7 @@ from datetime import date, datetime, timedelta
 
 from constants import SEASON_MIN_PRIOR_SIGMA
 from database import PlayerDB, SeasonDB
-from ttt_logic import age_sigma, get_ttt_history
+from ttt_logic import age_sigma, get_ttt_history, to_day_ordinal, today_ordinal
 
 logger = logging.getLogger("app.season_service")
 
@@ -62,6 +65,51 @@ def carry_forward_priors(end_day: int) -> dict:
     logger.info(f"Carried forward priors for {updated} player(s).")
     PlayerDB.upsert_players(players)
     return players
+
+
+def recalculate_ratings() -> tuple[dict, int]:
+    """Rebuild the current season's TTT history and refresh every player's rating.
+
+    Players who have played this season take their last in-season estimate;
+    players who have not keep their carried prior. Either way sigma is aged
+    from that point to today (see ttt_logic.age_sigma), so an idle player's
+    uncertainty grows even though nothing else about them changed.
+
+    Returns:
+        (players, match_count): the players dict post-update, and how many
+        matches fed the convergence. Both are for summary reporting.
+
+    Raises:
+        RuntimeError: if no season is open. Aging an idle player's prior needs
+            the season start as its anchor.
+    """
+    history, learning_curves, players, _ = get_ttt_history()
+    match_count = history.size if history is not None else 0
+
+    current_season = SeasonDB.get_current_season()
+    if current_season is None:
+        raise RuntimeError("No current season found; rating recalculation requires an active season.")
+    season_start_day = to_day_ordinal(current_season["start_date"])
+    today_day = today_ordinal()
+
+    for name in learning_curves:
+        if name not in players:
+            logger.warning(f"Player '{name}' in matches but not in database; skipped.")
+
+    for name, player in players.items():
+        curve = learning_curves.get(name)
+        if curve:
+            final_day, final = curve[-1]
+            player.mu = final.mu
+            base_sigma = final.sigma
+        else:
+            final_day = season_start_day
+            base_sigma = player.prior_sigma
+        player.sigma = age_sigma(base_sigma, today_day - final_day)
+
+    logger.info(f"Recalculated ratings for {len(players)} player(s) from {match_count} match(es).")
+    PlayerDB.upsert_players(players)
+    return players, match_count
 
 
 def start_new_season(end_date: date) -> int:

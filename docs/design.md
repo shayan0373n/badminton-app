@@ -81,11 +81,20 @@ is where the night is run from; the session screen is for playing only.
    returns to the hub. Pressing Start there again returns to the round in play;
    only "Next round" advances.
 
+### Admin page (`/admin`)
+
+The one URL the client honours besides the root, and deliberately unlinked: it
+is for the organizer after a night, not for the door. It shows the rating table
+(sortable by column, unrated players always last) and the recalculate button.
+
 ### Rating recalculation
 
-**Rating Recalculation** (`recalculate_ratings.py`)
-   - Standalone script, run manually
-   - Rebuilds TTT history for the current season and writes each player's `mu`/`sigma`, aging uncertainty to today (see Seasons)
+`season_service.recalculate_ratings()` rebuilds TTT history for the current
+season and writes each player's `mu`/`sigma`, aging uncertainty to today (see
+Seasons). It has two entry points that do nothing but call it: the button on
+the admin page (`POST /api/ratings/recalculate`) and `recalculate_ratings.py`
+for the command line. It is not run automatically on result upload; the club
+runs it once after a night's results are in.
 
 ## Design Notes
 

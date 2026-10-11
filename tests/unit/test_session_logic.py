@@ -699,6 +699,24 @@ def test_update_courts_to_zero_fails(sample_players, sample_gender_stats):
         session.update_courts(0)
 
 
+def test_reset_court_history_keeps_round_history(sample_players, sample_gender_stats):
+    """Resetting pairing history forgets partners/opponents but not results."""
+    session = ClubNightSession(
+        players=sample_players,
+        num_courts=2,
+        gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS,
+        is_doubles=True,
+    )
+    session.prepare_round()
+    assert any(session.court_history.values())
+
+    session.reset_court_history()
+
+    assert not session.court_history
+    assert session.round_num == 1
+
+
 # =============================================================================
 # Multiple Consecutive Rounds
 # =============================================================================

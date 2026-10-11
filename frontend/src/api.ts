@@ -93,6 +93,9 @@ export const api = {
       method: "PATCH",
     }),
 
+  resetMatchHistory: (name: string) =>
+    request<Session>(`/sessions/${enc(name)}/match-history`, { method: "DELETE" }),
+
   checkIn: (name: string, player: string, wantsChallenge = false) =>
     request<Session>(
       `/sessions/${enc(name)}/checkin/${enc(player)}`,

@@ -319,6 +319,15 @@ async def update_settings(
         return session_service.build_session_snapshot(session, name)
 
 
+@app.delete("/api/sessions/{name}/match-history")
+async def reset_match_history(name: SessionName) -> dict[str, Any]:
+    """Forgets who has played with and against whom, from the next round."""
+    async with session_lock(name):
+        session = load_session(name)
+        session_service.reset_match_history(session, name)
+        return session_service.build_session_snapshot(session, name)
+
+
 # =============================================================================
 # Check-in hub
 # =============================================================================

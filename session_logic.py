@@ -513,6 +513,13 @@ class ClubNightSession:
             raise SessionError("Number of courts must be at least 1.")
         self.num_courts = new_num_courts
 
+    def reset_court_history(self) -> None:
+        """Forgets who has partnered or faced whom; applies on the next prepared round.
+
+        round_history is untouched, so standings and results to upload survive.
+        """
+        self.court_history = defaultdict(_default_court_history_value)
+
     def set_court_result(
         self, round_idx: int, court_num: int, winner: tuple[str, ...] | None
     ) -> None:

@@ -157,6 +157,20 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
 
         <section className="section">
           <div className="section-head">
+            <h2>Match history</h2>
+          </div>
+          <button
+            className="btn"
+            disabled={busy}
+            onClick={() => run(() => api.resetMatchHistory(name), { blocking: true })}
+          >
+            Restart match history
+          </button>
+          <p className="hint">Forgets past partners and opponents. From next round.</p>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
             <h2>Add from registry</h2>
           </div>
           <input

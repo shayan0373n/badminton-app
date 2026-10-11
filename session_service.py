@@ -211,6 +211,12 @@ def update_weights(
     SessionManager.save(session, session_name)
 
 
+def reset_match_history(session: ClubNightSession, session_name: str) -> None:
+    """Clears the partner/opponent history the optimizer varies against, and persists it."""
+    session.reset_court_history()
+    SessionManager.save(session, session_name)
+
+
 def advance_to_next_round(session: ClubNightSession, session_name: str) -> None:
     """Finalizes the current round and generates the next one.
 

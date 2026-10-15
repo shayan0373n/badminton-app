@@ -128,6 +128,8 @@ class RoundRecord:
         round_num: 1-indexed round number
         matches: List of match assignments for this round
         resting_players: Set of players resting this round
+        required_pairs: Pairs (sorted name tuples) that had to partner when this
+            round was generated
         winners_by_court: Mapping of court number to winning team tuple.
             Missing keys = unreported courts.
     """
@@ -135,4 +137,5 @@ class RoundRecord:
     round_num: int
     matches: MatchList
     resting_players: set[PlayerName]
+    required_pairs: set[PlayerPair]
     winners_by_court: dict[int, tuple[str, ...]] = field(default_factory=dict)

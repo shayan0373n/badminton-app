@@ -423,12 +423,6 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
     for group_name, members in sorted(groups.items()):
         for member in members:
             groups_of[member].append(group_name)
-    locked_pairs = {
-        tuple(sorted((player, partner)))
-        for player, partners in session.get_required_partners().items()
-        for partner in partners
-    }
-
     rounds = []
     for record in session.round_history:
         matches = []
@@ -441,17 +435,15 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
                     "court": match.court,
                     "team_1": side_1,
                     "team_2": side_2,
-                    "locked_1": tuple(sorted(side_1)) in locked_pairs,
-                    "locked_2": tuple(sorted(side_2)) in locked_pairs,
+                    "locked_1": tuple(sorted(side_1)) in record.required_pairs,
+                    "locked_2": tuple(sorted(side_2)) in record.required_pairs,
                     "winner": winner,
                 }
             )
         rounds.append(
             {
                 "round_num": record.round_num,
-                "resting": sorted(
-                    p for p in record.resting_players if p in session.player_pool
-                ),
+                "resting": sorted(record.resting_players),
                 "matches": matches,
             }
         )

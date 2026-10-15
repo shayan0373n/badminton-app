@@ -466,6 +466,12 @@ class ClubNightSession:
             round_num=len(self.round_history) + 1,
             matches=sorted(result.matches, key=lambda m: m.court),
             resting_players=resting,
+            required_pairs={
+                (player, partner)
+                for player, partners in required_partners.items()
+                for partner in partners
+                if player < partner
+            },
         )
         self.round_history.append(record)
         self.court_history = result.court_history
@@ -516,22 +522,22 @@ class ClubNightSession:
         return {match.player_1, match.player_2}
 
     def _compute_session_stats(self) -> dict[PlayerName, tuple[int, int]]:
-        """Walks round_history once and returns {name: (matches, wins)} for every current player.
+        """Walks round_history once and returns {name: (matches, wins)} for everyone who has been on a court.
 
-        A match counts only when its court has a recorded winner. Players in
-        recorded matches get +1 matches; players on the winning team get +1 wins.
+        Who is checked in now plays no part: someone who has left keeps the
+        games they played. A match counts only when its court has a recorded
+        winner. Players in recorded matches get +1 matches; players on the
+        winning team get +1 wins.
         """
-        stats: dict[PlayerName, tuple[int, int]] = {
-            name: (0, 0) for name in self.player_pool
-        }
+        stats: dict[PlayerName, tuple[int, int]] = {}
         for record in self.round_history:
             for match in record.matches:
+                for name in self._match_player_names(match):
+                    stats.setdefault(name, (0, 0))
                 if match.court not in record.winners_by_court:
                     continue
                 winners = set(record.winners_by_court[match.court])
                 for name in self._match_player_names(match):
-                    if name not in stats:
-                        continue
                     m, w = stats[name]
                     stats[name] = (m + 1, w + (1 if name in winners else 0))
         return stats

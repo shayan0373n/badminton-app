@@ -928,8 +928,8 @@ def test_readd_removed_player_skips_played_rounds():
     assert played_player not in session.round_history[0].resting_players
 
 
-def test_standings_exclude_removed_players(sample_players, sample_gender_stats):
-    """Derived standings should not include players who were removed from the pool."""
+def test_standings_keep_players_who_left(sample_players, sample_gender_stats):
+    """Someone who checks out keeps the games they played in the standings."""
     session = ClubNightSession(
         players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
     )
@@ -945,6 +945,43 @@ def test_standings_exclude_removed_players(sample_players, sample_gender_stats):
     assert session.remove_player(winner_name) is True
     assert winner_name not in session.player_pool
 
-    # Standings (derived from round_history) should silently exclude the removed player.
-    standings_names = [row[0] for row in session.get_standings()]
-    assert winner_name not in standings_names
+    standings = {row[0]: row for row in session.get_standings()}
+    assert standings[winner_name][1:3] == (1, 1)
+
+
+def test_snapshot_resting_keeps_players_who_left(sample_players, sample_gender_stats):
+    """A round's resting line still names someone who has since checked out."""
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+    )
+    session.prepare_round()
+    leaver = sorted(session.resting_players)[0]
+
+    session.remove_player(leaver)
+
+    snapshot = session_service.build_session_snapshot(session, "Night")
+    assert leaver in snapshot["rounds"][0]["resting"]
+
+
+def test_round_keeps_the_pairs_it_was_generated_with(sample_players, sample_gender_stats):
+    """Pairing changes after a round is generated do not touch that round's record."""
+    session = ClubNightSession(
+        players=sample_players, num_courts=2, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+    )
+    session.pair_players("Alice", "Bob")
+    session.prepare_round()
+    record = session.round_history[0]
+    assert record.required_pairs == {("Alice", "Bob")}
+
+    session.remove_player("Alice")
+    session.pair_players("Charlie", "Dave")
+
+    assert record.required_pairs == {("Alice", "Bob")}
+    snapshot = session_service.build_session_snapshot(session, "Night")
+    locked_sides = [
+        set(side)
+        for match in snapshot["rounds"][0]["matches"]
+        for side, locked in ((match["team_1"], match["locked_1"]), (match["team_2"], match["locked_2"]))
+        if locked
+    ]
+    assert locked_sides == [{"Alice", "Bob"}]

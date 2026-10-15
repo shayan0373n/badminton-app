@@ -2,14 +2,16 @@
  * Tap and long-press on the same element, alongside a drag sensor.
  *
  * Three gestures share one name box, so the rules have to be unambiguous:
- *   - a press released before the timer, without moving, is a tap
+ *   - a press released before the timer, without moving, is a tap, fired from
+ *     the click that follows it
  *   - a press held past the timer and released without moving is a long press
  *   - movement past the slop radius cancels both: before the timer it is a
  *     scroll, after it the drag sensor has taken over
  *
  * The long press fires on release rather than when the timer elapses, because
  * holding is also how a touch drag starts and the hold alone cannot tell which
- * one is meant.
+ * one is meant. The tap waits for the click because a touch that only stops a
+ * momentum scroll still delivers pointerdown and pointerup, but no click.
  *
  * The caller drives the fill animation from `pressing`, because a press that
  * fires with no warning feels like a misfire on a shared tablet.
@@ -33,6 +35,7 @@ export function useLongPress({ onTap, onLongPress, disabled = false }: Options) 
   const timer = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const held = useRef(false);
+  const tapArmed = useRef(false);
 
   const clear = useCallback(() => {
     if (timer.current !== null) {
@@ -51,6 +54,7 @@ export function useLongPress({ onTap, onLongPress, disabled = false }: Options) 
     (event: React.PointerEvent) => {
       if (disabled || event.button !== 0) return;
       held.current = false;
+      tapArmed.current = false;
       origin.current = { x: event.clientX, y: event.clientY };
       setPressing(true);
       timer.current = window.setTimeout(() => {
@@ -82,10 +86,16 @@ export function useLongPress({ onTap, onLongPress, disabled = false }: Options) 
       // A drag may end here without the moves having reached this element.
       if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > SLOP_PX) return;
       if (wasHeld) onLongPress();
-      else onTap();
+      else tapArmed.current = true;
     },
-    [clear, onTap, onLongPress],
+    [clear, onLongPress],
   );
+
+  const onClick = useCallback(() => {
+    if (!tapArmed.current) return;
+    tapArmed.current = false;
+    onTap();
+  }, [onTap]);
 
   return {
     pressing,
@@ -93,6 +103,7 @@ export function useLongPress({ onTap, onLongPress, disabled = false }: Options) 
       onPointerDown,
       onPointerMove,
       onPointerUp,
+      onClick,
       onPointerCancel: clear,
       onPointerLeave: clear,
       // The browser's own long-press menu would fight ours.

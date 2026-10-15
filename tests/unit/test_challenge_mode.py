@@ -153,7 +153,6 @@ def test_challenge_survives_rounds(sample_players, sample_gender_stats):
     session.set_challenge("Bob", True)
 
     session.prepare_round()
-    session.finalize_round()
     session.prepare_round()
 
     assert session.challengers == {"Bob"}

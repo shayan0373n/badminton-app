@@ -270,21 +270,25 @@ class ClubNightSession:
 
         # Session flow state
         self.round_history: list[RoundRecord] = []
-        self._round_active: bool = False
         self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
-        self.queued_removals: set[PlayerName] = set()  # Players marked for removal
         # Players who asked for a harder game. Session-scoped, like teams: a
         # challenge is a statement about tonight, not a property of the player.
         self.challengers: set[PlayerName] = set()
         self.results_dirty: bool = False
 
     def __setstate__(self, state: dict) -> None:
-        """Restores a pickled session, defaulting fields added since it was saved."""
+        """Restores a pickled session, migrating fields changed since it was saved."""
+        # Check-outs used to wait for the round in play to end; apply any that
+        # were still waiting when the session was saved.
+        queued_removals = state.pop("queued_removals", set())
+        state.pop("_round_active", None)
         self.__dict__.update(state)
         if "challengers" not in state:
             self.challengers = set()
         if "candidates" not in state:
             self.candidates = dict(self.player_pool)
+        for name in queued_removals:
+            self.remove_player(name)
 
     # -------------------------------------------------------------------------
     # Properties (derived from round_history)
@@ -483,28 +487,8 @@ class ClubNightSession:
             resting_players=resting,
         )
         self.round_history.append(record)
-        self._round_active = True
         self.court_history = result.court_history
         self._rest_queue.rotate_after_round(resting)
-
-    def finalize_round(self) -> None:
-        """Finalizes the current round and processes any queued player removals.
-
-        Standings are derived from round_history on demand, so no recompute is
-        needed here -- winners stored in round_history[-1].winners_by_court are
-        already the source of truth.
-
-        Raises:
-            SessionError: If no round has been prepared yet.
-        """
-        if not self.round_history:
-            raise SessionError("Cannot finalize a round that was not prepared.")
-
-        self._round_active = False
-
-        # Process any queued player removals
-        for player_name in list(self.queued_removals):
-            self._remove_player_now(player_name)
 
     def update_courts(self, new_num_courts: int) -> None:
         """Updates available courts mid session; applies on the next prepared round."""
@@ -542,19 +526,6 @@ class ClubNightSession:
 
         if previous_winner != winner:
             self.results_dirty = True
-
-    @staticmethod
-    def _get_match_players(matches: MatchList) -> set[PlayerName]:
-        """Extracts all player names from a list of matches."""
-        players: set[PlayerName] = set()
-        for match in matches:
-            if isinstance(match, DoublesMatch):
-                players.update(match.team_1)
-                players.update(match.team_2)
-            else:
-                players.add(match.player_1)
-                players.add(match.player_2)
-        return players
 
     @staticmethod
     def _match_player_names(match) -> set[PlayerName]:
@@ -692,12 +663,14 @@ class ClubNightSession:
             self.set_challenge(name, True)
         return added
 
-    def check_out(self, name: PlayerName) -> tuple[bool, str]:
+    def check_out(self, name: PlayerName) -> bool:
         """Removes a player from the pool, keeping them on the candidate list.
 
+        Takes effect at once, whether or not they are on a court in the current
+        round: that round's matches keep their names, so its results still count.
+
         Returns:
-            Tuple of (success, status) where status is 'immediate', 'queued', or
-            'not_found' -- queued when they are mid-round, exactly as removal works.
+            True if they were checked out, False if they were not checked in.
         """
         return self.remove_player(name)
 
@@ -727,43 +700,16 @@ class ClubNightSession:
         self.set_challenge(name, name not in self.challengers)
         return name in self.challengers
 
-    def remove_player(self, name: str) -> tuple[bool, str]:
-        """
-        Marks a player for removal from the session.
-
-        - If player is currently playing, queues them for removal after round confirmation
-        - If player is resting or no round active, removes immediately
-
-        Args:
-            name: The player's name to remove
+    def remove_player(self, name: str) -> bool:
+        """Removes a player from the pool, their pairings, and the rest rotation.
 
         Returns:
-            Tuple of (success, status) where status is 'immediate', 'queued', or 'not_found'.
+            True if they were removed, False if they were not in the pool.
         """
         if name not in self.player_pool:
-            return False, "not_found"
-
-        # Check if player is currently playing in an active (non-finalized) round
-        is_playing = (
-            self._round_active
-            and self.current_round_matches is not None
-            and name in self._get_match_players(self.current_round_matches)
-        )
-
-        if is_playing:
-            # Queue for removal after round confirmation
-            self.queued_removals.add(name)
-            return True, "queued"
-        else:
-            # Remove immediately
-            self._remove_player_now(name)
-            return True, "immediate"
-
-    def _remove_player_now(self, name: str) -> None:
-        """Internal method to actually remove a player from all structures."""
-        if name in self.player_pool:
-            del self.player_pool[name]
+            return False
+        del self.player_pool[name]
         self.teams.pop(name, None)
         self.challengers.discard(name)
         self._rest_queue.remove_player(name)
-        self.queued_removals.discard(name)
+        return True

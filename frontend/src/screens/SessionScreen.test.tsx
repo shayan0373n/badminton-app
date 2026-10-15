@@ -22,7 +22,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     weights: { skill: 1, power: 1, pairing: 1 },
     round_num: 2,
     results_dirty: false,
-    queued_removals: [],
     candidates: [],
     groups: [],
     rounds: [

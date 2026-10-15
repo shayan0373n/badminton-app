@@ -352,11 +352,10 @@ async def check_in(
 
 @app.delete("/api/sessions/{name}/checkin/{player}")
 async def check_out(name: SessionName, player: str) -> dict[str, Any]:
-    """Checks a player out. Mid-round this queues until the round is finalized."""
+    """Checks a player out, at once, whether or not they are on a court."""
     async with session_lock(name):
         session = load_session(name)
-        success, _ = session_service.check_out_player(session, name, player)
-        if not success:
+        if not session_service.check_out_player(session, name, player):
             raise HTTPException(status_code=404, detail=f"{player} is not checked in")
         return session_service.build_session_snapshot(session, name)
 
@@ -471,8 +470,8 @@ async def remove_candidate(name: SessionName, player: str) -> dict[str, Any]:
 async def next_round(name: SessionName) -> dict[str, Any]:
     """Generates a round.
 
-    The first call starts the night; later calls finalize the current round and
-    solve the next one, which is when queued check-outs and setting changes land.
+    The first call starts the night; each later call solves the next one, which
+    is when setting changes land.
     """
     async with session_lock(name):
         session = load_session(name)
@@ -484,11 +483,7 @@ async def next_round(name: SessionName) -> dict[str, Any]:
             )
 
         before = session.round_num
-        if before == 0:
-            await run_blocking(session.prepare_round)
-            SessionManager.save(session, name)
-        else:
-            await run_blocking(session_service.advance_to_next_round, session, name)
+        await run_blocking(session_service.advance_to_next_round, session, name)
 
         if session.round_num == before:
             raise HTTPException(

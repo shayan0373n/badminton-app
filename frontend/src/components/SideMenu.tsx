@@ -163,7 +163,8 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             onClick={() => run(() => api.resetMatchHistory(name), { blocking: true })}
           >
             Restart match history
-          </button>        </section>
+          </button>
+        </section>
 
         <section className="section">
           <div className="section-head">

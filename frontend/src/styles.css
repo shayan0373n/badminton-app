@@ -220,7 +220,7 @@ button {
 
 .name-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
   gap: 12px;
 }
 
@@ -248,7 +248,7 @@ button {
 }
 
 /* Scrolling stays with the browser; the touch drag sensor claims the gesture
-   only after a hold. Double-tap zoom would delay every tap. */
+   only after a hold. */
 .namebox.gestures {
   touch-action: manipulation;
 }

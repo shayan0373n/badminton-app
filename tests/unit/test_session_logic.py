@@ -1,3 +1,4 @@
+import pickle
 import pytest
 import session_logic
 import session_service
@@ -9,7 +10,7 @@ from app_types import Gender, SinglesMatch, DoublesMatch
 
 
 # =============================================================================
-# Helper to set winners on a round record before finalizing
+# Helper to set winners on a round record
 # =============================================================================
 
 
@@ -130,7 +131,7 @@ def test_remove_player_clears_team_membership(sample_players, sample_gender_stat
         sample_players, sample_gender_stats, teams={"Alice": "A", "Bob": "A"}
     )
 
-    session.remove_player("Alice")  # no active round: immediate removal
+    session.remove_player("Alice")
 
     assert "Alice" not in session.teams
     assert session.get_required_partners() == {}
@@ -197,9 +198,6 @@ def test_session_pairing_weight_changes_matchmaking(monkeypatch):
     assert "P4" in low_p1_team_round1
     assert "P4" in high_p1_team_round1
 
-    low_pairing_session.finalize_round()
-    high_pairing_session.finalize_round()
-
     low_pairing_session.prepare_round()
     high_pairing_session.prepare_round()
 
@@ -213,7 +211,8 @@ def test_session_pairing_weight_changes_matchmaking(monkeypatch):
     assert "P4" not in high_p1_team_round2
 
 
-def test_finalize_round(sample_players, sample_gender_stats):
+def test_recorded_winners_count_in_standings(sample_players, sample_gender_stats):
+    """A court's recorded winner shows up in wins and matches played."""
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,
@@ -227,7 +226,6 @@ def test_finalize_round(sample_players, sample_gender_stats):
 
     # Set winners via round record (simulates auto-save)
     _set_winners(session, {1: match.team_1})
-    session.finalize_round()
 
     # Winners have 1 win / 1 match; losers have 0 wins / 1 match.
     for name in match.team_1:
@@ -320,7 +318,6 @@ def test_round_history_populated(sample_players, sample_gender_stats):
     for i in range(3):
         session.prepare_round()
         _set_winners(session, {m.court: m.team_1 for m in session.current_round_matches})
-        session.finalize_round()
 
     assert len(session.round_history) == 3
     assert session.round_num == 3
@@ -339,7 +336,6 @@ def test_set_court_result_updates_standings(sample_players, sample_gender_stats)
     team_1, team_2 = match.team_1, match.team_2
 
     _set_winners(session, {1: team_1})
-    session.finalize_round()
 
     for name in team_1:
         assert session.wins(name) == 1
@@ -369,11 +365,7 @@ def test_advance_with_partial_results(sample_players, sample_gender_stats):
     match = session.current_round_matches[0]
     _set_winners(session, {match.court: match.team_1})
 
-    # Finalize should succeed with partial results
-    session.finalize_round()
-    assert session.round_num == 1
-
-    # Can prepare next round
+    # The next round can be prepared with partial results
     session.prepare_round()
     assert session.round_num == 2
 
@@ -396,7 +388,6 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     session.prepare_round()
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
-    session.finalize_round()
 
     success = session.add_player(name="NewPlayer", gender=Gender.MALE)
     assert success is True
@@ -485,7 +476,6 @@ def _play_round(session):
     session.prepare_round()
     winners = {m.court: m.team_1 for m in session.current_round_matches}
     _set_winners(session, winners)
-    session.finalize_round()
 
 
 def test_rest_rotation_fair_when_player_joins_mid_session():
@@ -555,7 +545,6 @@ def test_rest_rotation_fair_when_player_leaves_and_rejoins():
     leaver = next(iter(session.resting_players))
     winners = {m.court: m.team_1 for m in session.current_round_matches}
     _set_winners(session, winners)
-    session.finalize_round()
 
     session.remove_player(leaver)
     assert leaver not in session.player_pool
@@ -593,7 +582,7 @@ def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
 
 
 def test_remove_player_while_playing():
-    """Removing a player mid-match should queue removal until round ends."""
+    """Removing a player who is on a court takes effect at once."""
     players = {
         "P1": Player(name="P1", gender=Gender.MALE, prior_mu=25.0),
         "P2": Player(name="P2", gender=Gender.MALE, prior_mu=25.0),
@@ -615,16 +604,37 @@ def test_remove_player_while_playing():
     match = session.current_round_matches[0]
     playing_player = match.team_1[0]
 
-    # Remove should queue, not immediately remove
-    success, status = session.remove_player(playing_player)
-    assert success is True
-    assert status == "queued"
-    assert playing_player in session.player_pool  # Still there
-
-    # After finalizing, player is removed
-    _set_winners(session, {1: match.team_1})
-    session.finalize_round()
+    assert session.remove_player(playing_player) is True
     assert playing_player not in session.player_pool
+
+    # The round in play keeps their name, so its result still counts.
+    assert playing_player in session.current_round_matches[0].team_1
+
+
+def test_old_pickles_apply_queued_check_outs(sample_players, sample_gender_stats):
+    """Check-outs still waiting in a session saved before they became immediate land on load."""
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+    )
+    session.prepare_round()
+    leaver = session.current_round_matches[0].team_1[0]
+    partner = session.current_round_matches[0].team_1[1]
+    session.pair_players(leaver, partner)
+    session.set_challenge(leaver, True)
+    # Shape the session as the old code saved it: still playing, check-out queued.
+    session.queued_removals = {leaver}
+    session._round_active = True
+
+    restored = pickle.loads(pickle.dumps(session))
+
+    assert leaver not in restored.player_pool
+    assert leaver in restored.candidates
+    assert leaver not in restored.teams
+    assert leaver not in restored.challengers
+    assert leaver not in restored._rest_queue
+    assert leaver in restored.current_round_matches[0].team_1
+    assert not hasattr(restored, "queued_removals")
+    assert not hasattr(restored, "_round_active")
 
 
 def test_remove_resting_player():
@@ -647,9 +657,7 @@ def test_remove_resting_player():
     # Find a resting player
     resting_player = list(session.resting_players)[0]
 
-    success, status = session.remove_player(resting_player)
-    assert success is True
-    assert status == "immediate"
+    assert session.remove_player(resting_player) is True
     assert resting_player not in session.player_pool
 
 
@@ -675,7 +683,6 @@ def test_update_courts_mid_session(sample_players, sample_gender_stats):
         1: session.current_round_matches[0].team_1,
         2: session.current_round_matches[1].team_1,
     })
-    session.finalize_round()
 
     # Change to 1 court
     session.update_courts(1)
@@ -739,10 +746,9 @@ def test_multiple_rounds_all_succeed(sample_players, sample_gender_stats):
         ), f"Round {round_num + 1} failed"
         assert len(session.current_round_matches) == 2
 
-        # Finalize with team_1 winning on all courts
+        # team_1 wins on all courts
         winners = {i + 1: session.current_round_matches[i].team_1 for i in range(2)}
         _set_winners(session, winners)
-        session.finalize_round()
 
     assert len(session.round_history) == 5
 
@@ -766,7 +772,6 @@ def test_resting_players_rotate_fairly(sample_players, sample_gender_stats):
             rest_counts[name] += 1
 
         _set_winners(session, {1: session.current_round_matches[0].team_1})
-        session.finalize_round()
 
     # Each player should have rested exactly 4 times (4 rest per round, 8 rounds, 8 players)
     for name, count in rest_counts.items():
@@ -835,7 +840,6 @@ def test_session_performance_boosts_matchmaking():
         matches[0].court: matches[0].team_1,
         matches[1].court: matches[1].team_1,
     })
-    session.finalize_round()
 
     # Round 2: winners (boosted mu) should land on the same court
     session.prepare_round()
@@ -860,7 +864,6 @@ def test_get_standings_sorted(sample_players, sample_gender_stats):
     session.prepare_round()
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
-    session.finalize_round()
 
     standings = session.get_standings()
 
@@ -907,18 +910,6 @@ def test_set_court_result_clear(sample_players, sample_gender_stats):
     assert match.court not in session.round_history[0].winners_by_court
 
 
-def test_finalize_round_no_history(sample_players, sample_gender_stats):
-    """finalize_round with no rounds prepared should raise SessionError."""
-    from exceptions import SessionError
-
-    session = ClubNightSession(
-        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
-    )
-
-    with pytest.raises(SessionError):
-        session.finalize_round()
-
-
 def test_add_player_before_any_rounds(sample_players, sample_gender_stats):
     """Adding a player before any rounds are prepared should work without error."""
     session = ClubNightSession(
@@ -952,7 +943,6 @@ def test_readd_removed_player_skips_played_rounds():
     match = session.current_round_matches[0]
     playing_round_1 = set(match.team_1 + match.team_2)
     _set_winners(session, {1: match.team_1})
-    session.finalize_round()
 
     # Pick a player who played in round 1
     played_player = list(playing_round_1)[0]
@@ -976,14 +966,10 @@ def test_standings_exclude_removed_players(sample_players, sample_gender_stats):
     winner_name = match.team_1[0]
 
     _set_winners(session, {1: match.team_1})
-    session.finalize_round()
 
     assert session.wins(winner_name) == 1
 
-    # After finalize, round is no longer active — removal is immediate
-    success, status = session.remove_player(winner_name)
-    assert success is True
-    assert status == "immediate"
+    assert session.remove_player(winner_name) is True
     assert winner_name not in session.player_pool
 
     # Standings (derived from round_history) should silently exclude the removed player.

@@ -82,10 +82,6 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
       // handle, and checked-in state is what a screen reader should hear.
       aria-label={label}
       aria-pressed={candidate.checked_in}
-      onPointerDown={(event) => {
-        drag.listeners?.onPointerDown?.(event);
-        handlers.onPointerDown(event);
-      }}
       onKeyDown={(event) => {
         // Keyboard equivalents: Enter toggles, Shift+Enter is the long press.
         if (event.key === "Enter" || event.key === " ") {

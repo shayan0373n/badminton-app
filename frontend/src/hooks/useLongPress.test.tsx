@@ -40,9 +40,21 @@ describe("useLongPress", () => {
     down(target);
     act(() => void vi.advanceTimersByTime(100));
     fireEvent.pointerUp(target);
+    fireEvent.click(target);
 
     expect(onTap).toHaveBeenCalledTimes(1);
     expect(onLongPress).not.toHaveBeenCalled();
+  });
+
+  it("ignores a press the browser does not follow with a click", () => {
+    // A touch that only stops a momentum scroll gets pointer events but no click.
+    render(<Probe onTap={onTap} onLongPress={onLongPress} />);
+    const target = screen.getByTestId("target");
+
+    down(target);
+    fireEvent.pointerUp(target);
+
+    expect(onTap).not.toHaveBeenCalled();
   });
 
   it("fires a long press on release after the timer, without a tap", () => {
@@ -54,8 +66,23 @@ describe("useLongPress", () => {
     expect(onLongPress).not.toHaveBeenCalled();
 
     fireEvent.pointerUp(target, { clientX: 0, clientY: 0 });
+    fireEvent.click(target);
     expect(onLongPress).toHaveBeenCalledTimes(1);
     expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("fires nothing when the browser cancels a held press", () => {
+    render(<Probe onTap={onTap} onLongPress={onLongPress} />);
+    const target = screen.getByTestId("target");
+
+    down(target);
+    act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    fireEvent.pointerCancel(target);
+    fireEvent.pointerUp(target);
+    fireEvent.click(target);
+
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
   });
 
   it("fires nothing when a hold turns into a drag", () => {

@@ -49,7 +49,6 @@ export interface Session {
   weights: Record<string, number>;
   round_num: number;
   results_dirty: boolean;
-  queued_removals: string[];
   candidates: Candidate[];
   groups: Group[];
   rounds: Round[];

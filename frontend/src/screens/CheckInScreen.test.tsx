@@ -34,7 +34,6 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     weights: { skill: 1, power: 1, pairing: 1 },
     round_num: 0,
     results_dirty: false,
-    queued_removals: [],
     candidates: [
       { name: "Alice", gender: "F", checked_in: false, challenging: false, groups: [] },
       { name: "Bob", gender: "M", checked_in: true, challenging: false, groups: [] },
@@ -92,6 +91,7 @@ describe("CheckInScreen", () => {
 
     press(box("Alice"));
     fireEvent.pointerUp(box("Alice"));
+    fireEvent.click(box("Alice"));
 
     await waitFor(() => expect(api.checkIn).toHaveBeenCalledWith("Night", "Alice"));
     expect(api.checkOut).not.toHaveBeenCalled();
@@ -102,6 +102,7 @@ describe("CheckInScreen", () => {
 
     press(box("Bob"));
     fireEvent.pointerUp(box("Bob"));
+    fireEvent.click(box("Bob"));
 
     await waitFor(() => expect(api.checkOut).toHaveBeenCalledWith("Night", "Bob"));
   });
@@ -165,6 +166,7 @@ describe("CheckInScreen", () => {
 
     press(box("Alice"));
     fireEvent.pointerUp(box("Alice"));
+    fireEvent.click(box("Alice"));
 
     const [, options] = run.mock.calls[0];
     const painted = options.optimistic(session);
@@ -229,11 +231,6 @@ describe("CheckInScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: /Unpair Dan and Eve/ }));
 
     await waitFor(() => expect(api.dissolveGroup).toHaveBeenCalledWith("Night", "G1"));
-  });
-
-  it("warns about players leaving after the round", () => {
-    renderScreen(makeSession({ queued_removals: ["Bob"] }));
-    expect(screen.getByText(/Leaving after this round: Bob/)).toBeInTheDocument();
   });
 
   it("warns when the session is not counting toward ratings", () => {

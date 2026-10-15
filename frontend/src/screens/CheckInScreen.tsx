@@ -113,12 +113,6 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
           </div>
         )}
 
-        {session.queued_removals.length > 0 && (
-          <div className="banner banner-warn">
-            Leaving after this round: {session.queued_removals.join(", ")}
-          </div>
-        )}
-
         <p className="hint">
           Tap to check in · Hold for a stronger match · Hold and drag onto a name to pair
         </p>

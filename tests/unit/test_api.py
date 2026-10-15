@@ -211,6 +211,22 @@ def test_check_out_returns_them_to_the_candidate_list(client):
     assert "Alice" in [c["name"] for c in snapshot["candidates"]]
 
 
+def test_check_out_of_a_player_on_court_is_immediate(client):
+    """Checking out someone in the round being played takes effect at once."""
+    create(client)
+    check_in_all(client)
+    snapshot = client.post("/api/sessions/Night/rounds").json()
+    match = snapshot["rounds"][0]["matches"][0]
+    player = match["team_1"][0]
+
+    snapshot = client.delete(f"/api/sessions/Night/checkin/{player}").json()
+
+    entry = next(c for c in snapshot["candidates"] if c["name"] == player)
+    assert entry["checked_in"] is False
+    # The round in play is untouched, so its result can still be entered.
+    assert player in snapshot["rounds"][0]["matches"][0]["team_1"]
+
+
 def test_check_out_when_not_checked_in_is_404(client):
     create(client)
     assert client.delete("/api/sessions/Night/checkin/Alice").status_code == 404

@@ -144,30 +144,6 @@ def add_guest_player(
     return True, None
 
 
-def remove_player_from_session(
-    session: ClubNightSession, session_name: str, player_name: str
-) -> tuple[bool, str]:
-    """
-    Removes a player from the session and persists the change.
-
-    Args:
-        session: The active session
-        session_name: Name of the session (for saving)
-        player_name: The player to remove
-
-    Returns:
-        Tuple of (success, status) where status is 'immediate', 'queued', or 'not_found'.
-    """
-    # 1. Modify session state
-    success, status = session.remove_player(player_name)
-
-    # 2. Persist state if successful
-    if success:
-        SessionManager.save(session, session_name)
-
-    return success, status
-
-
 def update_court_count(
     session: ClubNightSession, session_name: str, new_count: int
 ) -> None:
@@ -218,12 +194,11 @@ def reset_match_history(session: ClubNightSession, session_name: str) -> None:
 
 
 def advance_to_next_round(session: ClubNightSession, session_name: str) -> None:
-    """Finalizes the current round and generates the next one.
+    """Generates the next round.
 
     No database recording — use submit_session_results() for that.
     Partial results are OK (unreported courts are simply skipped).
     """
-    session.finalize_round()
     session.prepare_round()
     SessionManager.save(session, session_name)
 
@@ -363,17 +338,16 @@ def check_in_player(
 
 def check_out_player(
     session: ClubNightSession, session_name: str, player_name: str
-) -> tuple[bool, str]:
+) -> bool:
     """Removes a player from the pool, keeping them on the candidate list.
 
     Returns:
-        Tuple of (success, status) where status is 'immediate', 'queued', or
-        'not_found' -- queued when they are mid-round.
+        True if they were checked out, False if they were not checked in.
     """
-    success, status = session.check_out(player_name)
-    if success:
+    checked_out = session.check_out(player_name)
+    if checked_out:
         SessionManager.save(session, session_name)
-    return success, status
+    return checked_out
 
 
 def set_player_challenge(
@@ -490,7 +464,6 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
         "weights": dict(session.weights),
         "round_num": session.round_num,
         "results_dirty": session.results_dirty,
-        "queued_removals": sorted(session.queued_removals),
         "candidates": [
             {
                 "name": name,

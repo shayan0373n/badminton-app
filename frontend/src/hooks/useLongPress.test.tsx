@@ -1,6 +1,6 @@
 /**
  * The gesture rules, which are what decide whether the check-in screen feels
- * right: a tap must never fire a challenge, and a drag must never fire either.
+ * right: a tap must never fire a challenge, and a scroll or drag must never fire either.
  */
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -45,18 +45,42 @@ describe("useLongPress", () => {
     expect(onLongPress).not.toHaveBeenCalled();
   });
 
-  it("fires a long press once the timer elapses, without a tap", () => {
+  it("fires a long press on release after the timer, without a tap", () => {
     render(<Probe onTap={onTap} onLongPress={onLongPress} />);
     const target = screen.getByTestId("target");
 
     down(target);
     act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    expect(onLongPress).not.toHaveBeenCalled();
 
+    fireEvent.pointerUp(target, { clientX: 0, clientY: 0 });
     expect(onLongPress).toHaveBeenCalledTimes(1);
-
-    // Releasing afterwards must not also register a tap.
-    fireEvent.pointerUp(target);
     expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("fires nothing when a hold turns into a drag", () => {
+    render(<Probe onTap={onTap} onLongPress={onLongPress} />);
+    const target = screen.getByTestId("target");
+
+    down(target, 0, 0);
+    act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    move(target, 0, 60);
+    fireEvent.pointerUp(target, { clientX: 0, clientY: 60 });
+
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
+  });
+
+  it("fires nothing when released far from where the press began", () => {
+    render(<Probe onTap={onTap} onLongPress={onLongPress} />);
+    const target = screen.getByTestId("target");
+
+    down(target, 0, 0);
+    act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    fireEvent.pointerUp(target, { clientX: 80, clientY: 0 });
+
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
   });
 
   it("cancels both gestures once the pointer moves past the slop radius", () => {
@@ -79,6 +103,7 @@ describe("useLongPress", () => {
     down(target, 0, 0);
     move(target, 4, 3); // 5px, inside the 10px slop
     act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    fireEvent.pointerUp(target, { clientX: 4, clientY: 3 });
 
     expect(onLongPress).toHaveBeenCalledTimes(1);
   });
@@ -92,6 +117,8 @@ describe("useLongPress", () => {
     expect(target).toHaveTextContent("pressing");
 
     act(() => void vi.advanceTimersByTime(LONG_PRESS_MS));
+    expect(target).toHaveTextContent("pressing");
+    fireEvent.pointerUp(target);
     expect(target).toHaveTextContent("idle");
   });
 

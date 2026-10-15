@@ -220,14 +220,14 @@ button {
 
 .name-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px;
 }
 
 .namebox {
   position: relative;
-  min-height: 88px;
-  padding: 14px 16px;
+  min-height: 64px;
+  padding: 10px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--rule);
   background: var(--surface);
@@ -247,11 +247,10 @@ button {
     box-shadow 0.12s ease;
 }
 
-/* Only the check-in cards carry drag and long press, and only they need the
-   browser to keep its hands off the gesture. Setup's selection tiles reuse the
-   look but not the gestures, so a touch that starts on one still scrolls. */
+/* Scrolling stays with the browser; the touch drag sensor claims the gesture
+   only after a hold. Double-tap zoom would delay every tap. */
 .namebox.gestures {
-  touch-action: none;
+  touch-action: manipulation;
 }
 
 .namebox:active {
@@ -260,6 +259,7 @@ button {
 
 .namebox.in {
   border-color: var(--accent);
+  background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--ink);
 }
@@ -311,6 +311,48 @@ button {
 .namebox .nb-challenge {
   color: var(--challenge);
   font-weight: 550;
+}
+
+/* ---------- Selection chips ----------
+   Setup picks from the whole registry, so each name takes only the room its
+   text needs and the choice is shown by fill and tick rather than a caption. */
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.08s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.chip:active {
+  transform: scale(0.97);
+}
+
+.chip.in {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.chip.in::before {
+  content: "✓ ";
 }
 
 /* The press ring: fills over LONG_PRESS_MS so the gesture is visible
@@ -602,8 +644,8 @@ button {
   box-shadow: -12px 0 32px rgba(20, 23, 26, 0.12);
 }
 
-.drawer h2 {
-  margin: 0 0 16px;
+.drawer-title {
+  margin: 0;
   font-size: 1.1875rem;
   font-weight: 600;
   letter-spacing: -0.015em;

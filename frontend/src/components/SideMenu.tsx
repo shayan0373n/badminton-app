@@ -94,7 +94,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
       <button className="scrim" onClick={onClose} aria-label="Close menu" />
       <aside className="drawer" role="dialog" aria-label="Session menu">
         <div className="row" style={{ marginBottom: 16 }}>
-          <h2 style={{ flex: 3 }}>Manage session</h2>
+          <h2 className="drawer-title" style={{ flex: 3 }}>Manage session</h2>
           <button className="btn btn-icon" onClick={onClose} aria-label="Close">
             ✕
           </button>
@@ -120,7 +120,6 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               Apply
             </button>
           </div>
-          <p className="hint">From next round.</p>
         </section>
 
         <section className="section">
@@ -152,7 +151,6 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
           >
             Apply weights
           </button>
-          <p className="hint">Higher weighs more. From next round.</p>
         </section>
 
         <section className="section">
@@ -165,9 +163,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             onClick={() => run(() => api.resetMatchHistory(name), { blocking: true })}
           >
             Restart match history
-          </button>
-          <p className="hint">Forgets past partners and opponents. From next round.</p>
-        </section>
+          </button>        </section>
 
         <section className="section">
           <div className="section-head">

@@ -103,17 +103,16 @@ export function NameBox({ candidate, onTap, onLongPress, draggable = true }: Pro
         />
       )}
       <span className="nb-name">{candidate.name}</span>
-      <span className="nb-meta">
-        {candidate.challenging && <span className="nb-challenge">Challenge</span>}
-        {candidate.groups.map((group) => (
-          <span key={group} className="group-tag" style={{ background: groupColor(group) }}>
-            {group}
-          </span>
-        ))}
-        {!candidate.challenging && candidate.groups.length === 0 && (
-          <span>{candidate.checked_in ? "Checked in" : "Tap to check in"}</span>
-        )}
-      </span>
+      {(candidate.challenging || candidate.groups.length > 0) && (
+        <span className="nb-meta">
+          {candidate.challenging && <span className="nb-challenge">Challenge</span>}
+          {candidate.groups.map((group) => (
+            <span key={group} className="group-tag" style={{ background: groupColor(group) }}>
+              {group}
+            </span>
+          ))}
+        </span>
+      )}
     </button>
   );
 }

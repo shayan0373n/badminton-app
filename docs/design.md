@@ -73,7 +73,8 @@ is where the night is run from; the session screen is for playing only.
    ratings. `POST /api/sessions` creates the session with an open roster and no
    first round.
 2. **Check-in hub** — tap a name to check in, press and hold to check in wanting
-   a harder game, drag one name onto another to pair. The side menu holds every
+   a harder game, hold then drag one name onto another to pair. A touch that
+   moves without holding first scrolls. The side menu holds every
    management action: add or remove players, adjust courts and weights, upload
    results, end the night. Start generates round one and goes to the courts.
 3. **Session** — courts, results, games from earlier rounds still needing a

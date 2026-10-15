@@ -7,12 +7,13 @@
  * You come back between rounds to change things.
  */
 
-import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { useState } from "react";
 import { api } from "../api";
 import { NameBox, groupColor } from "../components/NameBox";
 import { SideMenu } from "../components/SideMenu";
+import { LONG_PRESS_MS, SLOP_PX } from "../hooks/useLongPress";
 import { withCandidate } from "../hooks/useSession";
 import type { Session } from "../types";
 
@@ -33,8 +34,13 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
 
   // A drag must not start from a plain tap, and the threshold has to clear the
   // long-press slop radius so the two gestures never both fire.
+  // A finger that moves straight away is scrolling the list, so a touch drag
+  // starts only after the same hold that arms a long press.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 12 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 12 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: LONG_PRESS_MS, tolerance: SLOP_PX },
+    }),
   );
 
   const name = session.name;
@@ -114,7 +120,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
         )}
 
         <p className="hint">
-          Tap to check in · Hold for a stronger match · Drag onto a name to pair
+          Tap to check in · Hold for a stronger match · Hold and drag onto a name to pair
         </p>
 
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>

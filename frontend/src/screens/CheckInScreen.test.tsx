@@ -112,6 +112,7 @@ describe("CheckInScreen", () => {
 
     press(box("Alice"));
     await vi.advanceTimersByTimeAsync(LONG_PRESS_MS);
+    fireEvent.pointerUp(box("Alice"), { clientX: 0, clientY: 0 });
     vi.useRealTimers();
 
     await waitFor(() =>
@@ -125,6 +126,7 @@ describe("CheckInScreen", () => {
 
     press(box("Bob"));
     await vi.advanceTimersByTimeAsync(LONG_PRESS_MS);
+    fireEvent.pointerUp(box("Bob"), { clientX: 0, clientY: 0 });
     vi.useRealTimers();
 
     await waitFor(() =>
@@ -139,6 +141,7 @@ describe("CheckInScreen", () => {
 
     press(box("Cara"));
     await vi.advanceTimersByTimeAsync(LONG_PRESS_MS);
+    fireEvent.pointerUp(box("Cara"), { clientX: 0, clientY: 0 });
     vi.useRealTimers();
 
     await waitFor(() =>

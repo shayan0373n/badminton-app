@@ -6,7 +6,7 @@
  * people actually arrive.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Stepper } from "../components/Stepper";
 import type { RegistryPlayer, Session, SessionSummary } from "../types";
@@ -26,6 +26,7 @@ export function SetupScreen({ onOpen }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([api.listSessions(), api.listPlayers()])
@@ -61,6 +62,24 @@ export function SetupScreen({ onOpen }: Props) {
       next.has(player) ? next.delete(player) : next.add(player);
       return next;
     });
+  }
+
+  // Picking from a search clears it and keeps the keyboard up, so the next
+  // name can be typed straight away.
+  function pick(player: string) {
+    toggle(player);
+    if (filter && !selected.has(player)) {
+      setFilter("");
+      searchRef.current?.focus();
+    }
+  }
+
+  // Enter picks only when the search names one player unambiguously.
+  function pickFromSearch() {
+    const needle = filter.trim().toLowerCase();
+    const exact = visible.find((p) => p.name.toLowerCase() === needle);
+    const match = exact ?? (visible.length === 1 ? visible[0] : undefined);
+    if (match && !selected.has(match.name)) pick(match.name);
   }
 
   async function create() {
@@ -164,25 +183,37 @@ export function SetupScreen({ onOpen }: Props) {
           <label className="field">
             <span>Expected players</span>
             <input
+              ref={searchRef}
+              type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  pickFromSearch();
+                }
+              }}
               placeholder="Search members…"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              enterKeyHint="done"
             />
           </label>
 
-          <div className="name-grid" style={{ marginBottom: 16 }}>
+          <div className="chip-list" style={{ marginBottom: 16 }}>
             {visible.map((player) => (
               <button
                 key={player.name}
                 type="button"
-                className={selected.has(player.name) ? "namebox in" : "namebox"}
-                onClick={() => toggle(player.name)}
+                className={selected.has(player.name) ? "chip in" : "chip"}
+                // Keeps focus (and the on-screen keyboard) on the search box.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(player.name)}
                 aria-pressed={selected.has(player.name)}
               >
-                <span className="nb-name">{player.name}</span>
-                <span className="nb-meta">
-                  {selected.has(player.name) ? "Selected" : "Tap to select"}
-                </span>
+                {player.name}
               </button>
             ))}
           </div>

@@ -1,4 +1,3 @@
-import pickle
 import pytest
 import session_logic
 import session_service
@@ -609,32 +608,6 @@ def test_remove_player_while_playing():
 
     # The round in play keeps their name, so its result still counts.
     assert playing_player in session.current_round_matches[0].team_1
-
-
-def test_old_pickles_apply_queued_check_outs(sample_players, sample_gender_stats):
-    """Check-outs still waiting in a session saved before they became immediate land on load."""
-    session = ClubNightSession(
-        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
-    )
-    session.prepare_round()
-    leaver = session.current_round_matches[0].team_1[0]
-    partner = session.current_round_matches[0].team_1[1]
-    session.pair_players(leaver, partner)
-    session.set_challenge(leaver, True)
-    # Shape the session as the old code saved it: still playing, check-out queued.
-    session.queued_removals = {leaver}
-    session._round_active = True
-
-    restored = pickle.loads(pickle.dumps(session))
-
-    assert leaver not in restored.player_pool
-    assert leaver in restored.candidates
-    assert leaver not in restored.teams
-    assert leaver not in restored.challengers
-    assert leaver not in restored._rest_queue
-    assert leaver in restored.current_round_matches[0].team_1
-    assert not hasattr(restored, "queued_removals")
-    assert not hasattr(restored, "_round_active")
 
 
 def test_remove_resting_player():

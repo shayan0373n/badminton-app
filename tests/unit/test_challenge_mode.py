@@ -167,18 +167,6 @@ def test_removing_a_player_clears_their_challenge(sample_players, sample_gender_
     assert "Bob" not in session.challengers
 
 
-def test_old_pickles_load_without_challengers(sample_players, sample_gender_stats):
-    """Sessions saved before this feature must still unpickle."""
-    session = _session(sample_players, sample_gender_stats)
-    state = session.__dict__.copy()
-    del state["challengers"]
-
-    restored = ClubNightSession.__new__(ClubNightSession)
-    restored.__setstate__(state)
-
-    assert restored.challengers == set()
-
-
 def test_round_trip_pickle_preserves_challengers(sample_players, sample_gender_stats):
     session = _session(sample_players, sample_gender_stats)
     session.set_challenge("Bob", True)

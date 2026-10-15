@@ -151,11 +151,6 @@ class Player:
             self.sigma = self.prior_sigma
 
     @property
-    def rating(self) -> float:
-        """Compatibility property for existing code that expects .rating"""
-        return self.mu
-
-    @property
     def conservative_rating(self) -> float:
         """Conservative skill estimate (mu - 3*sigma).
 
@@ -275,20 +270,6 @@ class ClubNightSession:
         # challenge is a statement about tonight, not a property of the player.
         self.challengers: set[PlayerName] = set()
         self.results_dirty: bool = False
-
-    def __setstate__(self, state: dict) -> None:
-        """Restores a pickled session, migrating fields changed since it was saved."""
-        # Check-outs used to wait for the round in play to end; apply any that
-        # were still waiting when the session was saved.
-        queued_removals = state.pop("queued_removals", set())
-        state.pop("_round_active", None)
-        self.__dict__.update(state)
-        if "challengers" not in state:
-            self.challengers = set()
-        if "candidates" not in state:
-            self.candidates = dict(self.player_pool)
-        for name in queued_removals:
-            self.remove_player(name)
 
     # -------------------------------------------------------------------------
     # Properties (derived from round_history)

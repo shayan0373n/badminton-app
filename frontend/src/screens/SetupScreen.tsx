@@ -27,6 +27,14 @@ export function SetupScreen({ onOpen }: Props) {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [searching, setSearching] = useState(false);
+
+  // On a phone the keyboard covers half the screen, so the search box moves to
+  // the top and the names get the space between it and the keyboard. Runs
+  // after the list has grown tall enough to scroll that far.
+  useEffect(() => {
+    if (searching) searchRef.current?.scrollIntoView({ block: "start" });
+  }, [searching]);
 
   useEffect(() => {
     Promise.all([api.listSessions(), api.listPlayers()])
@@ -184,6 +192,8 @@ export function SetupScreen({ onOpen }: Props) {
             <span>Expected players</span>
             <input
               ref={searchRef}
+              onFocus={() => setSearching(true)}
+              onBlur={() => setSearching(false)}
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
@@ -202,7 +212,10 @@ export function SetupScreen({ onOpen }: Props) {
             />
           </label>
 
-          <div className="chip-list" style={{ marginBottom: 16 }}>
+          <div
+            className={searching ? "chip-list searching" : "chip-list"}
+            style={{ marginBottom: 16 }}
+          >
             {visible.map((player) => (
               <button
                 key={player.name}

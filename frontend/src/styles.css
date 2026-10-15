@@ -323,6 +323,17 @@ button {
   gap: 8px;
 }
 
+/* Tall enough that the search box can always scroll up under the top bar,
+   however few names match. */
+.chip-list.searching {
+  min-height: 100vh;
+  align-content: flex-start;
+}
+
+.field input[type="search"] {
+  scroll-margin-top: 96px;
+}
+
 .chip {
   min-height: 44px;
   padding: 0 16px;

@@ -70,6 +70,11 @@ class SinglesMatch:
     player_1: PlayerName
     player_2: PlayerName
 
+    @property
+    def sides(self) -> tuple[tuple[PlayerName, ...], tuple[PlayerName, ...]]:
+        """Both sides of the net, uniform across game modes."""
+        return (self.player_1,), (self.player_2,)
+
 
 @dataclass
 class DoublesMatch:
@@ -84,6 +89,11 @@ class DoublesMatch:
     court: int
     team_1: PlayerPair
     team_2: PlayerPair
+
+    @property
+    def sides(self) -> tuple[tuple[PlayerName, ...], tuple[PlayerName, ...]]:
+        """Both sides of the net, uniform across game modes."""
+        return tuple(self.team_1), tuple(self.team_2)
 
 
 # A single match assignment

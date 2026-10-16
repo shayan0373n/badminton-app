@@ -31,7 +31,7 @@ import player_service
 import season_service
 import session_service
 from app_types import Gender
-from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, TTT_DEFAULT_MU
+from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, TTT_DEFAULT_MU, TTT_DEFAULT_SIGMA
 from database import PlayerDB
 from exceptions import DatabaseError, SessionError
 from session_logic import ClubNightSession, Player, SessionManager
@@ -192,7 +192,7 @@ async def save_players(payload: RegistryRequest) -> dict[str, Any]:
                 name=entry.name,
                 gender=entry.gender,
                 prior_mu=entry.prior_mu,
-                prior_sigma=existing.prior_sigma if existing else Player(name="", gender=entry.gender).prior_sigma,
+                prior_sigma=existing.prior_sigma if existing else TTT_DEFAULT_SIGMA,
                 mu=existing.mu if existing else None,
                 sigma=existing.sigma if existing else None,
                 database_id=existing.database_id if existing else None,
@@ -306,16 +306,12 @@ async def update_settings(
     """Changes courts or weights. Both take effect from the next round."""
     async with session_lock(name):
         session = load_session(name)
-        if payload.num_courts is not None:
-            try:
-                session_service.update_court_count(session, name, payload.num_courts)
-            except SessionError as e:
-                raise HTTPException(status_code=400, detail=str(e)) from e
-        if payload.weights is not None:
-            merged = {**session.weights, **payload.weights}
-            session_service.update_weights(
-                session, name, merged["skill"], merged["power"], merged["pairing"]
+        try:
+            session_service.update_settings(
+                session, name, num_courts=payload.num_courts, weights=payload.weights
             )
+        except SessionError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         return session_service.build_session_snapshot(session, name)
 
 
@@ -415,13 +411,13 @@ async def add_guest(name: SessionName, payload: GuestRequest) -> dict[str, Any]:
         success, error = await run_blocking(
             session_service.add_guest_player,
             session,
+            name,
             payload.name,
             payload.gender,
             payload.mu,
         )
         if not success:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=error)
-        SessionManager.save(session, name)
         return session_service.build_session_snapshot(session, name)
 
 
@@ -443,8 +439,7 @@ async def add_candidate(name: SessionName, player: str) -> dict[str, Any]:
         if player not in registry:
             raise HTTPException(status_code=404, detail=f"{player} is not in the registry")
 
-        session.candidates[player] = registry[player]
-        SessionManager.save(session, name)
+        session_service.add_candidate(session, name, registry[player])
         return session_service.build_session_snapshot(session, name)
 
 
@@ -453,11 +448,8 @@ async def remove_candidate(name: SessionName, player: str) -> dict[str, Any]:
     """Drops someone from tonight's list entirely, checking them out first."""
     async with session_lock(name):
         session = load_session(name)
-        if player not in session.candidates:
+        if not session_service.remove_candidate(session, name, player):
             raise HTTPException(status_code=404, detail=f"{player} is not on tonight's list")
-        session_service.check_out_player(session, name, player)
-        session.candidates.pop(player, None)
-        SessionManager.save(session, name)
         return session_service.build_session_snapshot(session, name)
 
 
@@ -503,21 +495,12 @@ async def set_winner(
 
     async with session_lock(name):
         session = load_session(name)
-        if not 0 <= round_index < len(session.round_history):
-            raise HTTPException(status_code=404, detail=f"No round at index {round_index}")
-
-        record = session.round_history[round_index]
-        match = next((m for m in record.matches if m.court == court), None)
-        if match is None:
-            raise HTTPException(status_code=404, detail=f"No court {court} in that round")
-
-        if payload.winner is None:
-            winner = None
-        else:
-            side_1, side_2 = session_service._match_sides(match)
-            winner = tuple(side_1 if payload.winner == 1 else side_2)
-
-        session_service.save_court_result(session, name, round_index, court, winner)
+        try:
+            session_service.save_court_result(
+                session, name, round_index, court, payload.winner
+            )
+        except SessionError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
         return session_service.build_session_snapshot(session, name)
 
 

@@ -20,6 +20,20 @@ def _set_winners(session, winners_by_court):
         record.winners_by_court[court_num] = winner
 
 
+def _join(session, name, gender, **player_fields):
+    """Puts a new person on tonight's list and checks them in."""
+    added = session.add_candidate(Player(name=name, gender=gender, **player_fields))
+    return added and session.check_in(name)
+
+
+def _record(session, name):
+    """Returns (matches, wins) for a player from the session standings."""
+    for row_name, matches, wins, _ in session.get_standings():
+        if row_name == name:
+            return matches, wins
+    return 0, 0
+
+
 # =============================================================================
 # Session Initialization & Basic Flow
 # =============================================================================
@@ -50,13 +64,34 @@ def test_add_remove_player(sample_players, sample_gender_stats):
         weights=DEFAULT_WEIGHTS,
     )
 
-    # Remove a player
-    session.remove_player("Alice")
+    # Check a player out: they leave the pool but stay on the list
+    assert session.check_out("Alice") is True
     assert "Alice" not in session.player_pool
+    assert "Alice" in session.candidates
 
-    # Add a player back
-    session.add_player(name="Zoe", gender=Gender.FEMALE)
-    assert "Zoe" in session.player_pool
+    # Check them back in
+    assert session.check_in("Alice") is True
+    assert "Alice" in session.player_pool
+
+    # Drop someone from the list entirely
+    assert session.remove_candidate("Bob") is True
+    assert "Bob" not in session.player_pool
+    assert "Bob" not in session.candidates
+    assert session.remove_candidate("Bob") is False
+
+
+def test_add_candidate_does_not_check_in(sample_players, sample_gender_stats):
+    session = ClubNightSession(
+        players=sample_players,
+        num_courts=2,
+        gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS,
+    )
+
+    assert session.add_candidate(Player(name="Zoe", gender=Gender.FEMALE)) is True
+    assert "Zoe" in session.candidates
+    assert "Zoe" not in session.player_pool
+    assert session.add_candidate(Player(name="Zoe", gender=Gender.FEMALE)) is False
 
 
 # =============================================================================
@@ -64,31 +99,22 @@ def test_add_remove_player(sample_players, sample_gender_stats):
 # =============================================================================
 
 
-def _make_teams_session(sample_players, sample_gender_stats, teams):
+def _make_teams_session(sample_players, sample_gender_stats):
     return ClubNightSession(
         players=sample_players,
         num_courts=2,
         gender_stats=sample_gender_stats,
         weights=DEFAULT_WEIGHTS,
         is_doubles=True,
-        teams=teams,
     )
 
 
-def test_required_partners_from_teams(sample_players, sample_gender_stats):
-    """Comma-separated team memberships produce pairwise partner constraints."""
-    session = _make_teams_session(
-        sample_players,
-        sample_gender_stats,
-        teams={
-            "Alice": "A",
-            "Bob": "A",
-            "Charlie": "B, C",  # member of two teams
-            "Dave": "B",
-            "Eve": "C",
-            "Frank": "Solo",  # single-member team: no constraint
-        },
-    )
+def test_required_partners_from_pairs(sample_players, sample_gender_stats):
+    """Each pair produces a partner constraint; a player may be in several pairs."""
+    session = _make_teams_session(sample_players, sample_gender_stats)
+    session.pair_players("Alice", "Bob")
+    session.pair_players("Charlie", "Dave")
+    session.pair_players("Charlie", "Eve")
 
     required = session.get_required_partners()
 
@@ -100,37 +126,32 @@ def test_required_partners_from_teams(sample_players, sample_gender_stats):
     assert "Frank" not in required
 
 
-def test_teams_ignore_players_absent_from_pool(sample_players, sample_gender_stats):
-    """A teams entry for someone not in the player pool creates no constraints."""
-    session = _make_teams_session(
-        sample_players,
-        sample_gender_stats,
-        teams={"Alice": "A", "Ghost": "A"},
-    )
+def test_pairing_needs_both_players_checked_in(sample_players, sample_gender_stats):
+    """Pairing with someone who is not checked in creates no constraint."""
+    session = _make_teams_session(sample_players, sample_gender_stats)
 
+    assert session.pair_players("Alice", "Ghost") is None
     assert session.get_required_partners() == {}
 
 
-def test_add_player_with_team_joins_partnership(sample_players, sample_gender_stats):
-    """A player added mid-session with a team name is constrained to its members."""
-    session = _make_teams_session(
-        sample_players, sample_gender_stats, teams={"Alice": "A"}
-    )
+def test_late_joiner_can_be_paired(sample_players, sample_gender_stats):
+    """A player checked in mid-session can be paired like anyone else."""
+    session = _make_teams_session(sample_players, sample_gender_stats)
 
-    session.add_player(name="Zoe", gender=Gender.FEMALE, team_name="A")
+    _join(session, "Zoe", Gender.FEMALE)
+    session.pair_players("Alice", "Zoe")
 
     required = session.get_required_partners()
     assert required["Zoe"] == {"Alice"}
     assert required["Alice"] == {"Zoe"}
 
 
-def test_remove_player_clears_team_membership(sample_players, sample_gender_stats):
-    """Removing a player drops their team entry and its constraints."""
-    session = _make_teams_session(
-        sample_players, sample_gender_stats, teams={"Alice": "A", "Bob": "A"}
-    )
+def test_check_out_clears_team_membership(sample_players, sample_gender_stats):
+    """Checking a player out drops their pairs and its constraints."""
+    session = _make_teams_session(sample_players, sample_gender_stats)
+    session.pair_players("Alice", "Bob")
 
-    session.remove_player("Alice")
+    session.check_out("Alice")
 
     assert "Alice" not in session.teams
     assert session.get_required_partners() == {}
@@ -228,11 +249,9 @@ def test_recorded_winners_count_in_standings(sample_players, sample_gender_stats
 
     # Winners have 1 win / 1 match; losers have 0 wins / 1 match.
     for name in match.team_1:
-        assert session.wins(name) == 1
-        assert session.matches_played(name) == 1
+        assert _record(session, name) == (1, 1)
     for name in match.team_2:
-        assert session.wins(name) == 0
-        assert session.matches_played(name) == 1
+        assert _record(session, name) == (1, 0)
 
 
 def test_set_court_result_marks_results_dirty(sample_players, sample_gender_stats):
@@ -249,7 +268,7 @@ def test_set_court_result_marks_results_dirty(sample_players, sample_gender_stat
 
     assert session.results_dirty is False
 
-    session.set_court_result(0, match.court, match.team_1)
+    session.set_court_result(0, match.court, 1)
 
     assert session.results_dirty is True
 
@@ -267,7 +286,7 @@ def test_clearing_court_result_marks_results_dirty(
 
     session.prepare_round()
     match = session.current_round_matches[0]
-    session.set_court_result(0, match.court, match.team_1)
+    session.set_court_result(0, match.court, 1)
     session.results_dirty = False
 
     session.set_court_result(0, match.court, None)
@@ -290,7 +309,7 @@ def test_submit_session_results_clears_results_dirty(
 
     session.prepare_round()
     match = session.current_round_matches[0]
-    session.set_court_result(0, match.court, match.team_1)
+    session.set_court_result(0, match.court, 1)
 
     monkeypatch.setattr(session_service.MatchDB, "delete_by_session", lambda _: None)
     monkeypatch.setattr(session_service.MatchDB, "add_match", lambda **kwargs: None)
@@ -337,18 +356,18 @@ def test_set_court_result_updates_standings(sample_players, sample_gender_stats)
     _set_winners(session, {1: team_1})
 
     for name in team_1:
-        assert session.wins(name) == 1
+        assert _record(session, name)[1] == 1
     for name in team_2:
-        assert session.wins(name) == 0
+        assert _record(session, name)[1] == 0
 
     # Edit past result: change winner to team_2. No recompute call needed --
     # standings derive from round_history on read.
-    session.set_court_result(0, 1, team_2)
+    session.set_court_result(0, 1, 2)
 
     for name in team_2:
-        assert session.wins(name) == 1
+        assert _record(session, name)[1] == 1
     for name in team_1:
-        assert session.wins(name) == 0
+        assert _record(session, name)[1] == 0
 
 
 def test_advance_with_partial_results(sample_players, sample_gender_stats):
@@ -388,7 +407,7 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
 
-    success = session.add_player(name="NewPlayer", gender=Gender.MALE)
+    success = _join(session, "NewPlayer", Gender.MALE)
     assert success is True
     assert "NewPlayer" in session.player_pool
 
@@ -396,8 +415,7 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     assert "NewPlayer" not in session.round_history[0].resting_players
 
     # New player has no match history yet.
-    assert session.wins("NewPlayer") == 0
-    assert session.matches_played("NewPlayer") == 0
+    assert _record(session, "NewPlayer") == (0, 0)
 
 
 def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats):
@@ -410,7 +428,7 @@ def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats)
         is_doubles=True,
     )
 
-    success = session.add_player(name="NewPlayer", gender=Gender.MALE, prior_mu=32.0)
+    success = _join(session, "NewPlayer", Gender.MALE, prior_mu=32.0)
     assert success is True
 
     player = session.player_pool["NewPlayer"]
@@ -420,7 +438,7 @@ def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats)
 
 
 def test_add_player_keeps_distinct_prior_and_posterior(sample_players, sample_gender_stats):
-    """Re-adding a player with a learned posterior keeps mu/sigma distinct from the prior."""
+    """Checking in a player with a learned posterior keeps mu/sigma distinct from the prior."""
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,
@@ -429,9 +447,10 @@ def test_add_player_keeps_distinct_prior_and_posterior(sample_players, sample_ge
         is_doubles=True,
     )
 
-    success = session.add_player(
-        name="Returning",
-        gender=Gender.MALE,
+    success = _join(
+        session,
+        "Returning",
+        Gender.MALE,
         prior_mu=28.0,
         prior_sigma=6.0,
         mu=31.5,
@@ -503,7 +522,7 @@ def test_rest_rotation_fair_when_player_joins_mid_session():
     for _ in range(3):
         _play_round(session)
 
-    session.add_player(name="LateJoiner", gender=Gender.MALE)
+    _join(session, "LateJoiner", Gender.MALE)
 
     for _ in range(5):
         _play_round(session)
@@ -545,13 +564,13 @@ def test_rest_rotation_fair_when_player_leaves_and_rejoins():
     winners = {m.court: m.team_1 for m in session.current_round_matches}
     _set_winners(session, winners)
 
-    session.remove_player(leaver)
+    session.check_out(leaver)
     assert leaver not in session.player_pool
 
     for _ in range(2):
         _play_round(session)
 
-    session.add_player(name=leaver, gender=Gender.MALE)
+    session.check_in(leaver)
 
     for _ in range(5):
         _play_round(session)
@@ -566,7 +585,7 @@ def test_rest_rotation_fair_when_player_leaves_and_rejoins():
 
 
 def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
-    """Adding a player that already exists should fail."""
+    """Adding or checking in a player who is already there should fail."""
     session = ClubNightSession(
         players=sample_players,
         num_courts=1,
@@ -575,13 +594,13 @@ def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
         is_doubles=True,
     )
 
-    success = session.add_player(name="Alice", gender=Gender.FEMALE)
-    assert success is False
+    assert session.add_candidate(Player(name="Alice", gender=Gender.FEMALE)) is False
+    assert session.check_in("Alice") is False
 
 
 
-def test_remove_player_while_playing():
-    """Removing a player who is on a court takes effect at once."""
+def test_check_out_while_playing():
+    """Checking out a player who is on a court takes effect at once."""
     players = {
         "P1": Player(name="P1", gender=Gender.MALE, prior_mu=25.0),
         "P2": Player(name="P2", gender=Gender.MALE, prior_mu=25.0),
@@ -603,15 +622,15 @@ def test_remove_player_while_playing():
     match = session.current_round_matches[0]
     playing_player = match.team_1[0]
 
-    assert session.remove_player(playing_player) is True
+    assert session.check_out(playing_player) is True
     assert playing_player not in session.player_pool
 
     # The round in play keeps their name, so its result still counts.
     assert playing_player in session.current_round_matches[0].team_1
 
 
-def test_remove_resting_player():
-    """Removing a resting player should happen immediately."""
+def test_check_out_resting_player():
+    """Checking out a resting player should happen immediately."""
     players = {
         f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=25.0)
         for i in range(1, 6)
@@ -630,7 +649,7 @@ def test_remove_resting_player():
     # Find a resting player
     resting_player = list(session.resting_players)[0]
 
-    assert session.remove_player(resting_player) is True
+    assert session.check_out(resting_player) is True
     assert resting_player not in session.player_pool
 
 
@@ -860,10 +879,26 @@ def test_set_court_result_invalid_index(sample_players, sample_gender_stats):
     session.prepare_round()
 
     with pytest.raises(SessionError):
-        session.set_court_result(5, 1, ("Alice",))
+        session.set_court_result(5, 1, 1)
 
     with pytest.raises(SessionError):
-        session.set_court_result(-1, 1, ("Alice",))
+        session.set_court_result(-1, 1, 1)
+
+
+def test_set_court_result_invalid_court_or_side(sample_players, sample_gender_stats):
+    """set_court_result rejects a court not in the round and a side other than 1 or 2."""
+    from exceptions import SessionError
+
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+    )
+    session.prepare_round()
+
+    with pytest.raises(SessionError):
+        session.set_court_result(0, 9, 1)
+
+    with pytest.raises(SessionError):
+        session.set_court_result(0, 1, 3)
 
 
 def test_set_court_result_clear(sample_players, sample_gender_stats):
@@ -875,7 +910,7 @@ def test_set_court_result_clear(sample_players, sample_gender_stats):
     match = session.current_round_matches[0]
 
     # Set a winner
-    session.set_court_result(0, match.court, match.team_1)
+    session.set_court_result(0, match.court, 1)
     assert match.court in session.round_history[0].winners_by_court
 
     # Clear it
@@ -890,15 +925,14 @@ def test_add_player_before_any_rounds(sample_players, sample_gender_stats):
     )
 
     # No prepare_round called — round_history is empty
-    success = session.add_player(name="EarlyJoiner", gender=Gender.MALE)
+    success = _join(session, "EarlyJoiner", Gender.MALE)
     assert success is True
     assert "EarlyJoiner" in session.player_pool
-    assert session.wins("EarlyJoiner") == 0
-    assert session.matches_played("EarlyJoiner") == 0
+    assert _record(session, "EarlyJoiner") == (0, 0)
 
 
 def test_readd_removed_player_skips_played_rounds():
-    """Re-adding a removed player should not mark them as resting in rounds they played."""
+    """Checking a player back in should not mark them as resting in rounds they played."""
     players = {
         "P1": Player(name="P1", gender=Gender.MALE, prior_mu=25.0),
         "P2": Player(name="P2", gender=Gender.MALE, prior_mu=25.0),
@@ -920,9 +954,9 @@ def test_readd_removed_player_skips_played_rounds():
     # Pick a player who played in round 1
     played_player = list(playing_round_1)[0]
 
-    # Remove and re-add
-    session.remove_player(played_player)
-    session.add_player(name=played_player, gender=Gender.MALE, mu=25.0)
+    # Check out and back in
+    session.check_out(played_player)
+    session.check_in(played_player)
 
     # Players who played should NOT be retroactively marked as resting
     assert played_player not in session.round_history[0].resting_players
@@ -940,9 +974,9 @@ def test_standings_keep_players_who_left(sample_players, sample_gender_stats):
 
     _set_winners(session, {1: match.team_1})
 
-    assert session.wins(winner_name) == 1
+    assert _record(session, winner_name)[1] == 1
 
-    assert session.remove_player(winner_name) is True
+    assert session.check_out(winner_name) is True
     assert winner_name not in session.player_pool
 
     standings = {row[0]: row for row in session.get_standings()}
@@ -957,7 +991,7 @@ def test_snapshot_resting_keeps_players_who_left(sample_players, sample_gender_s
     session.prepare_round()
     leaver = sorted(session.resting_players)[0]
 
-    session.remove_player(leaver)
+    session.check_out(leaver)
 
     snapshot = session_service.build_session_snapshot(session, "Night")
     assert leaver in snapshot["rounds"][0]["resting"]
@@ -973,7 +1007,7 @@ def test_round_keeps_the_pairs_it_was_generated_with(sample_players, sample_gend
     record = session.round_history[0]
     assert record.required_pairs == {("Alice", "Bob")}
 
-    session.remove_player("Alice")
+    session.check_out("Alice")
     session.pair_players("Charlie", "Dave")
 
     assert record.required_pairs == {("Alice", "Bob")}

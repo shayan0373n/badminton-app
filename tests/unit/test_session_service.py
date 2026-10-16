@@ -26,9 +26,13 @@ def test_add_guest_player_persists_entered_skill_as_prior(
         lambda players_dict: persisted.update(players_dict),
     )
 
+    monkeypatch.setattr(
+        session_service.SessionManager, "save", lambda *args, **kwargs: None
+    )
+
     session = _make_session(sample_players, sample_gender_stats)
     success, error = session_service.add_guest_player(
-        session, name="Guest", gender=Gender.MALE, mu=32.0
+        session, "test_session", name="Guest", gender=Gender.MALE, mu=32.0
     )
 
     assert success is True
@@ -43,10 +47,35 @@ def test_add_guest_player_persists_entered_skill_as_prior(
     assert persisted["Guest"].prior_mu == 32.0
 
 
-def test_add_player_from_registry_preserves_prior_and_posterior(
+def test_failed_guest_sync_leaves_no_trace(
     monkeypatch, sample_players, sample_gender_stats
 ):
-    """Re-adding a registry member keeps both their prior_mu and learned mu/sigma."""
+    """A guest the registry rejects is neither checked in nor left on tonight's list."""
+    from exceptions import DatabaseError
+
+    def reject(players_dict):
+        raise DatabaseError("down")
+
+    monkeypatch.setattr(session_service.PlayerDB, "upsert_players", reject)
+    monkeypatch.setattr(
+        session_service.SessionManager, "save", lambda *args, **kwargs: None
+    )
+
+    session = _make_session(sample_players, sample_gender_stats)
+    success, error = session_service.add_guest_player(
+        session, "test_session", name="Guest", gender=Gender.MALE, mu=32.0
+    )
+
+    assert success is False
+    assert error is not None
+    assert "Guest" not in session.player_pool
+    assert "Guest" not in session.candidates
+
+
+def test_add_candidate_then_check_in_preserves_prior_and_posterior(
+    monkeypatch, sample_players, sample_gender_stats
+):
+    """Adding a registry member and checking them in keeps prior_mu and learned mu/sigma."""
     monkeypatch.setattr(
         session_service.SessionManager, "save", lambda *args, **kwargs: None
     )
@@ -61,11 +90,9 @@ def test_add_player_from_registry_preserves_prior_and_posterior(
         sigma=3.0,
     )
 
-    added = session_service.add_player_from_registry(
-        session, session_name="test_session", player=member
-    )
-
-    assert added is True
+    assert session_service.add_candidate(session, "test_session", member) is True
+    assert "Returning" not in session.player_pool
+    assert session_service.check_in_player(session, "test_session", "Returning") is True
 
     pool_player = session.player_pool["Returning"]
     assert pool_player.prior_mu == 28.0

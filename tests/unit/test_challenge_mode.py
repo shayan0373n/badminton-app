@@ -138,15 +138,6 @@ def test_set_challenge_rejects_unknown_player(sample_players, sample_gender_stat
     assert session.challengers == set()
 
 
-def test_toggle_challenge_flips_and_reports_state(sample_players, sample_gender_stats):
-    session = _session(sample_players, sample_gender_stats)
-
-    assert session.toggle_challenge("Bob") is True
-    assert session.challengers == {"Bob"}
-    assert session.toggle_challenge("Bob") is False
-    assert session.challengers == set()
-
-
 def test_challenge_survives_rounds(sample_players, sample_gender_stats):
     """The flag is not consumed by being honoured -- it persists until cleared."""
     session = _session(sample_players, sample_gender_stats)
@@ -162,7 +153,7 @@ def test_removing_a_player_clears_their_challenge(sample_players, sample_gender_
     session = _session(sample_players, sample_gender_stats)
     session.set_challenge("Bob", True)
 
-    session.remove_player("Bob")
+    session.check_out("Bob")
 
     assert "Bob" not in session.challengers
 

@@ -27,14 +27,13 @@ from logger import setup_logging
 
 setup_logging(app_level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
-import player_service
 import season_service
 import session_service
 from app_types import Gender
-from constants import DEFAULT_WEIGHTS, TTT_DEFAULT_SIGMA
+from constants import DEFAULT_WEIGHTS
 from database import PlayerDB
 from exceptions import DatabaseError, SessionError
-from session_logic import ClubNightSession, Player, SessionManager
+from session_logic import ClubNightSession, SessionManager
 
 logger = logging.getLogger("app.api")
 
@@ -126,16 +125,6 @@ class GuestRequest(BaseModel):
     mu: float = Field(ge=0.0, le=60.0)
 
 
-class RegistryPlayer(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    gender: Gender
-    prior_mu: float = Field(ge=0.0, le=60.0)
-
-
-class RegistryRequest(BaseModel):
-    players: list[RegistryPlayer]
-
-
 # =============================================================================
 # App
 # =============================================================================
@@ -201,30 +190,6 @@ async def list_players() -> dict[str, Any]:
             key=lambda p: p["name"].casefold(),
         )
     }
-
-
-@app.put("/api/players")
-async def save_players(payload: RegistryRequest) -> dict[str, Any]:
-    """Applies registry edits: adds, renames by name, and prior_mu changes."""
-    try:
-        old = await run_blocking(PlayerDB.get_all_players)
-        new: dict[str, Player] = {}
-        for entry in payload.players:
-            existing = old.get(entry.name)
-            new[entry.name] = Player(
-                name=entry.name,
-                gender=entry.gender,
-                prior_mu=entry.prior_mu,
-                prior_sigma=existing.prior_sigma if existing else TTT_DEFAULT_SIGMA,
-                mu=existing.mu if existing else None,
-                sigma=existing.sigma if existing else None,
-                database_id=existing.database_id if existing else None,
-            )
-        await run_blocking(player_service.sync_registry_to_database, old, new)
-    except DatabaseError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-
-    return {"saved": len(payload.players)}
 
 
 @app.post("/api/ratings/recalculate")

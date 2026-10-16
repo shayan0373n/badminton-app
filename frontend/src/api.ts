@@ -63,9 +63,6 @@ const json = (body: unknown): RequestInit => ({
 export const api = {
   listPlayers: () => request<{ players: RegistryPlayer[] }>("/players"),
 
-  savePlayers: (players: Pick<RegistryPlayer, "name" | "gender" | "prior_mu">[]) =>
-    request<{ saved: number }>("/players", { ...json({ players }), method: "PUT" }),
-
   recalculateRatings: () =>
     request<{ players: number; matches: number }>("/ratings/recalculate", { method: "POST" }),
 

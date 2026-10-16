@@ -20,7 +20,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 │       (Routing and serialization only, no logic)         │
 ├─────────────────────────────────────────────────────────┤
 │                    Service Layer                         │
-│  session_service.py, player_service.py, rating_service.py│
+│  session_service.py, season_service.py, rating_service.py│
 │   (Orchestrates domain logic + database interactions)    │
 ├─────────────────────────────────────────────────────────┤
 │                    Domain Layer                          │
@@ -44,7 +44,7 @@ Rules (these are norms for future changes, not just descriptions):
 
 ## Conventions
 
-- **Error handling** — Database operations raise `DatabaseError` (from `exceptions.py`); Supabase exceptions are wrapped, never exposed to higher layers. The UI catches errors and displays them via `st.error()`.
+- **Error handling** — Database operations raise `DatabaseError` (from `exceptions.py`); Supabase exceptions are wrapped, never exposed to higher layers. The API turns domain and database errors into HTTP error responses, and the client shows their message.
 - **Type hints** — Extensive throughout; use the aliases in `app_types.py` (`PlayerName`, `PlayerPair`, `CourtHistory`, …).
 - **Logging** — `logging.getLogger("app.<module_name>")`, configured via `logger.setup_logging()`.
 - **Defaults** — All configuration constants live in `constants.py`.

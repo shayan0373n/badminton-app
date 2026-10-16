@@ -11,6 +11,7 @@ import type {
   Session,
   SessionSummary,
   SubmitResult,
+  Weights,
 } from "./types";
 
 export class ApiError extends Error {
@@ -85,7 +86,7 @@ export const api = {
 
   updateSettings: (
     name: string,
-    body: { num_courts?: number; weights?: Record<string, number> },
+    body: { num_courts?: number; weights?: Partial<Weights> },
   ) =>
     request<Session>(`/sessions/${enc(name)}`, {
       ...json(body),

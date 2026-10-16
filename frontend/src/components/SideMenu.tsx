@@ -9,17 +9,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Stepper } from "./Stepper";
-import type { RegistryPlayer, Session } from "../types";
+import type { RegistryPlayer, Session, Weights } from "../types";
 
 /** How many names the drawer will list before it insists on a search. */
 const REGISTRY_LIST_MAX = 12;
 
 /** Optimizer keys paired with what they mean to whoever is running the night. */
-const WEIGHT_LABELS = [
+const WEIGHT_LABELS: readonly (readonly [keyof Weights, string])[] = [
   ["skill", "Even courts"],
   ["power", "Even teams"],
   ["pairing", "Vary partners"],
-] as const;
+];
+
+/** The skill range the server accepts for a guest (GuestRequest.mu in api.py). */
+const GUEST_MU_MIN = 0;
+const GUEST_MU_MAX = 60;
+
+/** Returns the entered skill as a number, or null if it is empty or out of range. */
+function parseGuestMu(text: string): number | null {
+  if (text.trim() === "") return null;
+  const value = Number(text);
+  if (!Number.isFinite(value) || value < GUEST_MU_MIN || value > GUEST_MU_MAX) return null;
+  return value;
+}
 
 interface Props {
   session: Session;
@@ -38,8 +50,9 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
   const [guestName, setGuestName] = useState("");
   const [guestGender, setGuestGender] = useState<"M" | "F">("M");
   const [guestMu, setGuestMu] = useState("25");
+  const guestSkill = parseGuestMu(guestMu);
   const [courts, setCourts] = useState(session.num_courts);
-  const [weights, setWeights] = useState<Record<string, number>>(session.weights);
+  const [weights, setWeights] = useState<Weights>(session.weights);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
@@ -131,7 +144,7 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               <div className="field" key={key} style={{ marginBottom: 0 }}>
                 <span>{label}</span>
                 <Stepper
-                  value={weights[key] ?? 1}
+                  value={weights[key]}
                   onChange={(next) => setWeights({ ...weights, [key]: next })}
                   min={0}
                   max={10}
@@ -223,24 +236,29 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               <input
                 type="number"
                 step={1}
+                min={GUEST_MU_MIN}
+                max={GUEST_MU_MAX}
                 value={guestMu}
                 onChange={(e) => setGuestMu(e.target.value)}
                 aria-label="Starting skill"
               />
             </div>
             <p className="hint">
-              Skill: 18 lower · 25 middle · 32 upper.
+              {guestSkill === null
+                ? `Enter a skill from ${GUEST_MU_MIN} to ${GUEST_MU_MAX}.`
+                : "Skill: 18 lower · 25 middle · 32 upper."}
             </p>
             <button
               className="btn"
-              disabled={!guestName.trim() || busy}
+              disabled={!guestName.trim() || guestSkill === null || busy}
               onClick={async () => {
+                if (guestSkill === null) return;
                 await run(
                   () =>
                     api.addGuest(name, {
                       name: guestName.trim(),
                       gender: guestGender,
-                      mu: Number(guestMu),
+                      mu: guestSkill,
                     }),
                   { blocking: true },
                 );

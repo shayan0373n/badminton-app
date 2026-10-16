@@ -20,9 +20,11 @@ def _set_winners(session, winners_by_court):
         record.winners_by_court[court_num] = winner
 
 
-def _join(session, name, gender, **player_fields):
+def _join(session, name, gender, prior_mu, **player_fields):
     """Puts a new person on tonight's list and checks them in."""
-    added = session.add_candidate(Player(name=name, gender=gender, **player_fields))
+    added = session.add_candidate(
+        Player(name=name, gender=gender, prior_mu=prior_mu, **player_fields)
+    )
     return added and session.check_in(name)
 
 
@@ -56,7 +58,7 @@ def test_session_initialization(sample_players, sample_gender_stats):
     assert session.resting_players == set()
 
 
-def test_add_remove_player(sample_players, sample_gender_stats):
+def test_candidates_check_in_and_out(sample_players, sample_gender_stats):
     session = ClubNightSession(
         players=sample_players,
         num_courts=2,
@@ -126,6 +128,15 @@ def test_required_partners_from_pairs(sample_players, sample_gender_stats):
     assert "Frank" not in required
 
 
+def test_groups_ignore_players_not_in_pool(sample_players, sample_gender_stats):
+    """A stored membership for someone not checked in creates no group or constraint."""
+    session = _make_teams_session(sample_players, sample_gender_stats)
+    session.teams = {"Alice": "G1", "Ghost": "G1"}
+
+    assert session.get_groups() == {}
+    assert session.get_required_partners() == {}
+
+
 def test_pairing_needs_both_players_checked_in(sample_players, sample_gender_stats):
     """Pairing with someone who is not checked in creates no constraint."""
     session = _make_teams_session(sample_players, sample_gender_stats)
@@ -138,7 +149,7 @@ def test_late_joiner_can_be_paired(sample_players, sample_gender_stats):
     """A player checked in mid-session can be paired like anyone else."""
     session = _make_teams_session(sample_players, sample_gender_stats)
 
-    _join(session, "Zoe", Gender.FEMALE)
+    _join(session, "Zoe", Gender.FEMALE, prior_mu=25.0)
     session.pair_players("Alice", "Zoe")
 
     required = session.get_required_partners()
@@ -393,7 +404,7 @@ def test_advance_with_partial_results(sample_players, sample_gender_stats):
 # =============================================================================
 
 
-def test_add_player_mid_session(sample_players, sample_gender_stats):
+def test_join_mid_session(sample_players, sample_gender_stats):
     """Adding a player mid-session should put them in the pool with 0 stats and not touch past rounds."""
     session = ClubNightSession(
         players=sample_players,
@@ -407,7 +418,7 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     match = session.current_round_matches[0]
     _set_winners(session, {1: match.team_1})
 
-    success = _join(session, "NewPlayer", Gender.MALE)
+    success = _join(session, "NewPlayer", Gender.MALE, prior_mu=25.0)
     assert success is True
     assert "NewPlayer" in session.player_pool
 
@@ -418,7 +429,7 @@ def test_add_player_mid_session(sample_players, sample_gender_stats):
     assert _record(session, "NewPlayer") == (0, 0)
 
 
-def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats):
+def test_joiner_skill_lands_in_prior_mu(sample_players, sample_gender_stats):
     """A mid-session player's entered skill must populate prior_mu, the input to rating recalc."""
     session = ClubNightSession(
         players=sample_players,
@@ -437,7 +448,7 @@ def test_add_player_skill_lands_in_prior_mu(sample_players, sample_gender_stats)
     assert player.mu == 32.0
 
 
-def test_add_player_keeps_distinct_prior_and_posterior(sample_players, sample_gender_stats):
+def test_check_in_keeps_distinct_prior_and_posterior(sample_players, sample_gender_stats):
     """Checking in a player with a learned posterior keeps mu/sigma distinct from the prior."""
     session = ClubNightSession(
         players=sample_players,
@@ -459,6 +470,8 @@ def test_add_player_keeps_distinct_prior_and_posterior(sample_players, sample_ge
     assert success is True
 
     player = session.player_pool["Returning"]
+    # Check-in shares the candidate's Player object rather than copying it.
+    assert player is session.candidates["Returning"]
     assert player.prior_mu == 28.0
     assert player.prior_sigma == 6.0
     assert player.mu == 31.5
@@ -522,7 +535,7 @@ def test_rest_rotation_fair_when_player_joins_mid_session():
     for _ in range(3):
         _play_round(session)
 
-    _join(session, "LateJoiner", Gender.MALE)
+    _join(session, "LateJoiner", Gender.MALE, prior_mu=25.0)
 
     for _ in range(5):
         _play_round(session)
@@ -584,7 +597,7 @@ def test_rest_rotation_fair_when_player_leaves_and_rejoins():
         )
 
 
-def test_add_duplicate_player_fails(sample_players, sample_gender_stats):
+def test_duplicate_candidate_or_check_in_fails(sample_players, sample_gender_stats):
     """Adding or checking in a player who is already there should fail."""
     session = ClubNightSession(
         players=sample_players,
@@ -901,6 +914,54 @@ def test_set_court_result_invalid_court_or_side(sample_players, sample_gender_st
         session.set_court_result(0, 1, 3)
 
 
+def test_singles_results_record_the_winning_player(monkeypatch, sample_players, sample_gender_stats):
+    """In singles, side 2 means player_2 won, both in standings and in the upload."""
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats,
+        weights=DEFAULT_WEIGHTS, is_doubles=False, database_id=7, is_recorded=True,
+    )
+    session.prepare_round()
+    match = session.current_round_matches[0]
+
+    session.set_court_result(0, match.court, 2)
+
+    assert session.round_history[0].winners_by_court[match.court] == (match.player_2,)
+    assert _record(session, match.player_2) == (1, 1)
+    assert _record(session, match.player_1) == (1, 0)
+
+    uploaded = []
+    monkeypatch.setattr(session_service.MatchDB, "delete_by_session", lambda _: None)
+    monkeypatch.setattr(session_service.MatchDB, "add_match", lambda **kw: uploaded.append(kw))
+    monkeypatch.setattr(SessionManager, "save", lambda *_: None)
+    session_service.submit_session_results(session, "Test")
+
+    assert uploaded == [
+        {"session_id": 7, "player_1": match.player_1, "player_2": match.player_2, "winner_side": 2}
+    ]
+
+
+def test_unknown_or_negative_weights_are_rejected(sample_players, sample_gender_stats):
+    from exceptions import SessionError
+
+    session = ClubNightSession(
+        players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
+    )
+
+    with pytest.raises(SessionError):
+        session.update_weights({"skil": 2.0})
+    with pytest.raises(SessionError):
+        session.update_weights({"skill": -1.0})
+    with pytest.raises(SessionError):
+        ClubNightSession(
+            players=sample_players, num_courts=1, gender_stats=sample_gender_stats,
+            weights={"skill": 1.0}, is_doubles=True,
+        )
+    assert session.weights == dict(DEFAULT_WEIGHTS)
+
+    session.update_weights({"power": 2.5})
+    assert session.weights == {**DEFAULT_WEIGHTS, "power": 2.5}
+
+
 def test_set_court_result_clear(sample_players, sample_gender_stats):
     """Setting winner to None should remove the court result."""
     session = ClubNightSession(
@@ -918,20 +979,20 @@ def test_set_court_result_clear(sample_players, sample_gender_stats):
     assert match.court not in session.round_history[0].winners_by_court
 
 
-def test_add_player_before_any_rounds(sample_players, sample_gender_stats):
+def test_join_before_any_rounds(sample_players, sample_gender_stats):
     """Adding a player before any rounds are prepared should work without error."""
     session = ClubNightSession(
         players=sample_players, num_courts=1, gender_stats=sample_gender_stats, weights=DEFAULT_WEIGHTS, is_doubles=True
     )
 
     # No prepare_round called — round_history is empty
-    success = _join(session, "EarlyJoiner", Gender.MALE)
+    success = _join(session, "EarlyJoiner", Gender.MALE, prior_mu=25.0)
     assert success is True
     assert "EarlyJoiner" in session.player_pool
     assert _record(session, "EarlyJoiner") == (0, 0)
 
 
-def test_readd_removed_player_skips_played_rounds():
+def test_check_back_in_skips_played_rounds():
     """Checking a player back in should not mark them as resting in rounds they played."""
     players = {
         "P1": Player(name="P1", gender=Gender.MALE, prior_mu=25.0),

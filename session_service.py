@@ -11,7 +11,7 @@ import logging
 from collections import defaultdict
 
 from database import MatchDB, PlayerDB, SessionDB
-from exceptions import DatabaseError
+from exceptions import DatabaseError, SessionError
 from rating_service import compute_gender_statistics
 from session_logic import ClubNightSession, Player, SessionManager
 from app_types import Gender, RoundRecord
@@ -100,12 +100,22 @@ def add_guest_player(
         gender: Gender of the guest
         mu: Initial skill rating
 
+    A name that already belongs to a registry member is refused: saving the
+    guest would overwrite that member's rating. Add the member instead.
+
     Returns:
         Tuple of (success, error_message); error_message is None on success.
+
+    Raises:
+        DatabaseError: If the registry cannot be read.
     """
+    if name in session.candidates:
+        return False, f"{name} is already on tonight's list"
+    if name in PlayerDB.get_all_players():
+        return False, f"{name} is already a member; add them from the member list instead"
+
     guest = Player(name=name, gender=gender, prior_mu=mu)
-    if not session.add_candidate(guest):
-        return False, "Player already exists"
+    session.add_candidate(guest)
 
     # Sync to cloud registry
     try:
@@ -115,7 +125,8 @@ def add_guest_player(
         session.remove_candidate(guest.name)
         return False, f"Failed to sync to database: {e}"
 
-    session.check_in(guest.name)
+    if not session.check_in(guest.name):
+        raise SessionError(f"Guest '{guest.name}' was added but could not be checked in")
     SessionManager.save(session, session_name)
     return True, None
 
@@ -138,12 +149,13 @@ def update_settings(
         weights: Weights to override ("skill", "power", "pairing"); others are kept
 
     Raises:
-        SessionError: If num_courts is below 1.
+        SessionError: If num_courts is below 1, or a weight is unknown or
+            negative. Nothing is saved in that case.
     """
+    if weights is not None:
+        session.update_weights(weights)
     if num_courts is not None:
         session.update_courts(num_courts)
-    if weights is not None:
-        session.weights = {**session.weights, **weights}
     SessionManager.save(session, session_name)
 
 
@@ -210,28 +222,22 @@ def submit_session_results(
 
 
 def create_new_session(
-    player_table: dict[str, Player],
-    num_courts: int,
-    weights: dict,
     session_name: str,
+    candidates: dict[str, Player],
+    num_courts: int,
+    weights: dict[str, float],
     is_doubles: bool,
-    is_recorded: bool = True,
-    candidates: dict[str, Player] | None = None,
-    prepare_first_round: bool = True,
+    is_recorded: bool,
 ) -> ClubNightSession:
     """
-    Creates and initializes a new session.
+    Creates a session with tonight's candidates and nobody checked in yet.
 
     1. Computes gender statistics from all registered players
     2. Creates session record in Database (if recorded)
     3. Initializes ClubNightSession object
-    4. Prepares the first round, unless the caller checks players in first
-    5. Saves session to disk
+    4. Saves session to disk
 
-    Args:
-        player_table: Players already in the pool; empty for a check-in flow
-        candidates: Who might turn up tonight; defaults to player_table
-        prepare_first_round: False when a check-in page runs before round one
+    Round one is generated later, once players have checked in.
 
     Returns:
         The initialized ClubNightSession object.
@@ -250,7 +256,7 @@ def create_new_session(
 
     # 3. Initialize Session Object
     session = ClubNightSession(
-        players=player_table,
+        players={},
         num_courts=num_courts,
         gender_stats=gender_stats,
         database_id=database_id,
@@ -260,11 +266,7 @@ def create_new_session(
         candidates=candidates,
     )
 
-    # 4. Prepare First Round
-    if prepare_first_round:
-        session.prepare_round()
-
-    # 5. Save to Disk
+    # 4. Save to Disk
     SessionManager.save(session, session_name)
 
     return session

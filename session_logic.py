@@ -15,11 +15,11 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from constants import (
+    DEFAULT_WEIGHTS,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     SESSION_PERFORMANCE_FACTOR,
     SOLVER_BACKEND,
-    TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
 )
 from exceptions import SessionError
@@ -132,7 +132,7 @@ class Player:
     name: str
     gender: Gender
     # TTT priors (input to TTT - set manually based on perceived skill level)
-    prior_mu: float | None = TTT_DEFAULT_MU
+    prior_mu: float | None = None
     prior_sigma: float = TTT_DEFAULT_SIGMA
     # TTT posteriors (output from TTT - computed from match history)
     # Default to None so __post_init__ can set them to prior values
@@ -183,22 +183,23 @@ class SessionManager:
             session_name: Name of the session to load
 
         Returns:
-            The session object or None if not found/corrupted
+            The session object, or None if no file exists for that name.
+
+        Raises:
+            SessionError: If the file exists but cannot be read. The file is
+                left in place so it can be inspected or restored.
         """
         path = SessionManager._get_session_path(session_name)
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as f:
-                    session = pickle.load(f)
-                    logger.info("Session '%s' loaded", session_name)
-                    return session
-            except (pickle.UnpicklingError, EOFError):
-                logger.error(
-                    "Failed to load session '%s' - file may be corrupted", session_name
-                )
-                os.remove(path)
-                return None
-        return None
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                session = pickle.load(f)
+        except Exception as e:
+            logger.exception("Failed to load session '%s' from %s", session_name, path)
+            raise SessionError(f"Session '{session_name}' could not be read") from e
+        logger.info("Session '%s' loaded", session_name)
+        return session
 
     @staticmethod
     def clear(session_name: str) -> None:
@@ -237,7 +238,8 @@ class ClubNightSession:
         # player_pool holds everyone currently checked in and eligible to play.
         self.player_pool = players
         # candidates is the setup-time guest list: who might turn up tonight.
-        # Checking in copies a candidate into player_pool; checking out removes
+        # Checking in adds a candidate to player_pool (the same Player object,
+        # so pool players must not be mutated in place); checking out removes
         # them again. Nobody is ever removed from candidates by checking out.
         self.candidates: dict[PlayerName, "Player"] = (
             candidates if candidates is not None else dict(players)
@@ -257,7 +259,12 @@ class ClubNightSession:
         # State required for the optimizer
         # CourtHistory values are (partner_count, opponent_count)
         self.court_history: CourtHistory = defaultdict(_default_court_history_value)
-        self.weights = weights
+        if set(weights) != set(DEFAULT_WEIGHTS):
+            raise SessionError(
+                f"Weights must name exactly {sorted(DEFAULT_WEIGHTS)}, got {sorted(weights)}"
+            )
+        self.weights: dict[str, float] = {}
+        self.update_weights(weights)
 
         # Session flow state
         self.round_history: list[RoundRecord] = []
@@ -449,6 +456,20 @@ class ClubNightSession:
             raise SessionError("Number of courts must be at least 1.")
         self.num_courts = new_num_courts
 
+    def update_weights(self, weights: dict[str, float]) -> None:
+        """Changes some or all optimizer weights; applies on the next prepared round.
+
+        Raises:
+            SessionError: If a key is not a known weight or a value is negative.
+        """
+        unknown = set(weights) - set(DEFAULT_WEIGHTS)
+        if unknown:
+            raise SessionError(f"Unknown weight(s): {', '.join(sorted(unknown))}")
+        negative = [key for key, value in weights.items() if value < 0]
+        if negative:
+            raise SessionError(f"Weights cannot be negative: {', '.join(sorted(negative))}")
+        self.weights = {**self.weights, **weights}
+
     def reset_court_history(self) -> None:
         """Forgets who has partnered or faced whom; applies on the next prepared round.
 
@@ -470,14 +491,14 @@ class ClubNightSession:
             SessionError: If the round, court or side does not exist.
         """
         if round_idx < 0 or round_idx >= len(self.round_history):
-            raise SessionError(f"Invalid round index: {round_idx}")
+            raise SessionError(f"No round at index {round_idx}")
         if winning_side not in (None, 1, 2):
             raise SessionError(f"Winning side must be 1, 2 or None, not {winning_side}")
 
         record = self.round_history[round_idx]
         match = next((m for m in record.matches if m.court == court_num), None)
         if match is None:
-            raise SessionError(f"No court {court_num} in round {round_idx + 1}")
+            raise SessionError(f"No court {court_num} in the round at index {round_idx}")
 
         winner = None if winning_side is None else match.sides[winning_side - 1]
         previous_winner = record.winners_by_court.get(court_num)
@@ -551,7 +572,9 @@ class ClubNightSession:
         return True
 
     def check_in(self, name: PlayerName, wants_challenge: bool = False) -> bool:
-        """Moves a candidate into the playing pool, at the back of the rest queue.
+        """Adds a candidate to the playing pool, at the back of the rest queue.
+
+        They stay on the candidate list.
 
         Args:
             name: A name from `candidates`

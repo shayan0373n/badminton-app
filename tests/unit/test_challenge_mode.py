@@ -149,7 +149,7 @@ def test_challenge_survives_rounds(sample_players, sample_gender_stats):
     assert session.challengers == {"Bob"}
 
 
-def test_removing_a_player_clears_their_challenge(sample_players, sample_gender_stats):
+def test_checking_out_clears_their_challenge(sample_players, sample_gender_stats):
     session = _session(sample_players, sample_gender_stats)
     session.set_challenge("Bob", True)
 

@@ -85,8 +85,8 @@ def generate_singles_round(
     skill_s = {p: _scale(real_skills[p]) for p in available_players}
     min_possible = min(skill_s.values())
     max_possible = max(skill_s.values())
-    w_skill = int(weights["skill"])
-    w_pairing = int(weights["pairing"])
+    w_skill = _scale(weights["skill"])
+    w_pairing = _scale(weights["pairing"])
 
     # --- Variables ---
     # x[p, c]: player p is on court c
@@ -280,9 +280,9 @@ def generate_one_round(
     max_tier = max(tier_s.values())
 
     # Scale weights to integers
-    w_skill = int(weights["skill"])
-    w_power = int(weights["power"])
-    w_pairing = int(weights["pairing"])
+    w_skill = _scale(weights["skill"])
+    w_power = _scale(weights["power"])
+    w_pairing = _scale(weights["pairing"])
 
     # Pre-compute scaled pair powers (team average skill)
     player_pairs = list(combinations(sorted(available_players), 2))

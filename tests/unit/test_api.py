@@ -61,8 +61,17 @@ def client(tmp_path, monkeypatch, registry):
         yield c
 
 
+# Every field the client must send when creating a session.
+SESSION_SETTINGS = {"num_courts": 2, "is_doubles": True, "is_recorded": True}
+
+
 def create(client, name="Night", candidates=None, **kwargs) -> dict:
-    body = {"name": name, "candidates": candidates or list(REGISTRY_MU), **kwargs}
+    body = {
+        "name": name,
+        "candidates": candidates or list(REGISTRY_MU),
+        **SESSION_SETTINGS,
+        **kwargs,
+    }
     response = client.post("/api/sessions", json=body)
     assert response.status_code == 201, response.text
     return response.json()
@@ -130,21 +139,21 @@ def test_create_session_starts_with_nobody_checked_in(client):
 def test_create_rejects_duplicate_name(client):
     create(client)
     response = client.post(
-        "/api/sessions", json={"name": "Night", "candidates": ["Alice"]}
+        "/api/sessions", json={"name": "Night", "candidates": ["Alice"], **SESSION_SETTINGS}
     )
     assert response.status_code == 409
 
 
 def test_create_rejects_unknown_candidate(client):
     response = client.post(
-        "/api/sessions", json={"name": "Night", "candidates": ["Nobody"]}
+        "/api/sessions", json={"name": "Night", "candidates": ["Nobody"], **SESSION_SETTINGS}
     )
     assert response.status_code == 400
     assert "Nobody" in response.json()["detail"]
 
 
 def test_create_rejects_empty_candidate_list(client):
-    response = client.post("/api/sessions", json={"name": "Night", "candidates": []})
+    response = client.post("/api/sessions", json={"name": "Night", "candidates": [], **SESSION_SETTINGS})
     assert response.status_code == 422
 
 
@@ -613,3 +622,46 @@ def test_guest_is_created_and_checked_in(client):
 
 def test_health(client):
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_session_name_cannot_leave_the_sessions_folder(client):
+    for bad in ["../escape", "a/b", ".hidden"]:
+        response = client.post(
+            "/api/sessions", json={"name": bad, "candidates": ["Alice"], **SESSION_SETTINGS}
+        )
+        assert response.status_code == 422, bad
+
+
+def test_create_requires_explicit_settings(client):
+    response = client.post("/api/sessions", json={"name": "Night", "candidates": ["Alice"]})
+    assert response.status_code == 422
+
+
+def test_create_with_partial_weights_is_rejected(client):
+    response = client.post(
+        "/api/sessions",
+        json={"name": "Night", "candidates": ["Alice"], **SESSION_SETTINGS, "weights": {"skill": 2}},
+    )
+    assert response.status_code == 422
+
+
+def test_unknown_weight_is_rejected(client):
+    create(client)
+    response = client.patch("/api/sessions/Night", json={"weights": {"skil": 2}})
+    assert response.status_code == 422
+
+
+def test_guest_requires_gender_and_skill(client):
+    create(client)
+    response = client.post("/api/sessions/Night/players", json={"name": "Zoe"})
+    assert response.status_code == 422
+
+
+def test_unreadable_session_file_is_kept_and_reported(client, tmp_path):
+    create(client)
+    path = tmp_path / "sessions" / "Night.pkl"
+    path.write_bytes(b"not a pickle")
+
+    assert client.get("/api/sessions/Night").status_code == 500
+    assert client.get("/api/sessions").json()["sessions"] == []
+    assert path.read_bytes() == b"not a pickle"

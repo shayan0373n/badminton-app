@@ -66,7 +66,9 @@ export const api = {
   recalculateRatings: () =>
     request<{ players: number; matches: number }>("/ratings/recalculate", { method: "POST" }),
 
-  listSessions: () => request<{ sessions: SessionSummary[] }>("/sessions"),
+  /** `unreadable` names sessions whose saved file could not be loaded. */
+  listSessions: () =>
+    request<{ sessions: SessionSummary[]; unreadable: string[] }>("/sessions"),
 
   createSession: (body: {
     name: string;
@@ -93,7 +95,7 @@ export const api = {
   resetMatchHistory: (name: string) =>
     request<Session>(`/sessions/${enc(name)}/match-history`, { method: "DELETE" }),
 
-  checkIn: (name: string, player: string, wantsChallenge = false) =>
+  checkIn: (name: string, player: string, wantsChallenge: boolean) =>
     request<Session>(
       `/sessions/${enc(name)}/checkin/${enc(player)}`,
       json({ wants_challenge: wantsChallenge }),

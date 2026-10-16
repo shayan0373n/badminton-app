@@ -15,9 +15,9 @@ import logging
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import Body, FastAPI, HTTPException, Path, status
+from fastapi import FastAPI, HTTPException, Path, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,7 +30,7 @@ setup_logging(app_level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upp
 import season_service
 import session_service
 from app_types import Gender
-from constants import DEFAULT_WEIGHTS
+from constants import DEFAULT_WEIGHTS, MAX_WEIGHT
 from database import PlayerDB
 from exceptions import DatabaseError, SessionError
 from session_logic import ClubNightSession, SessionManager
@@ -76,15 +76,15 @@ SESSION_NAME_PATTERN = r"^[^/\\.][^/\\]*$"
 
 
 class Weights(BaseModel, extra="forbid"):
-    skill: float = Field(ge=0)
-    power: float = Field(ge=0)
-    pairing: float = Field(ge=0)
+    skill: float = Field(ge=0, le=MAX_WEIGHT)
+    power: float = Field(ge=0, le=MAX_WEIGHT)
+    pairing: float = Field(ge=0, le=MAX_WEIGHT)
 
 
 class WeightChanges(BaseModel, extra="forbid"):
-    skill: float | None = Field(default=None, ge=0)
-    power: float | None = Field(default=None, ge=0)
-    pairing: float | None = Field(default=None, ge=0)
+    skill: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
+    power: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
+    pairing: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
 
 
 class CreateSessionRequest(BaseModel):
@@ -103,7 +103,7 @@ class SessionSettingsRequest(BaseModel):
 
 
 class CheckInRequest(BaseModel):
-    wants_challenge: bool = False
+    wants_challenge: bool
 
 
 class ChallengeRequest(BaseModel):
@@ -116,7 +116,7 @@ class PairRequest(BaseModel):
 
 
 class WinnerRequest(BaseModel):
-    winner: int | None = Field(default=None, description="1, 2, or null to clear")
+    winner: Literal[1, 2] | None = Field(description="1, 2, or null to clear")
 
 
 class GuestRequest(BaseModel):
@@ -214,14 +214,16 @@ async def recalculate_ratings() -> dict[str, Any]:
 async def list_sessions() -> dict[str, Any]:
     """Returns resumable sessions with just enough detail to pick one.
 
-    A session whose file cannot be read is left out of the list (and logged by
-    SessionManager); the file itself is kept.
+    Sessions whose file cannot be read are listed by name under "unreadable",
+    so they can be seen and deleted, and their names are not reused.
     """
     summaries = []
+    unreadable = []
     for name in SessionManager.list_sessions():
         try:
             session = SessionManager.load(name)
         except SessionError:
+            unreadable.append(name)
             continue
         if session is None:
             continue
@@ -235,7 +237,10 @@ async def list_sessions() -> dict[str, Any]:
                 "is_recorded": session.is_recorded,
             }
         )
-    return {"sessions": sorted(summaries, key=lambda s: s["name"])}
+    return {
+        "sessions": sorted(summaries, key=lambda s: s["name"]),
+        "unreadable": sorted(unreadable),
+    }
 
 
 @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
@@ -286,10 +291,15 @@ async def get_session(name: SessionName) -> dict[str, Any]:
 
 @app.delete("/api/sessions/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(name: SessionName) -> None:
-    """Discards a session. Submitted results already in the database survive."""
-    load_session(name)
+    """Discards a session, even one whose file cannot be read.
+
+    Submitted results already in the database survive.
+    """
     async with session_lock(name):
-        SessionManager.clear(name)
+        if not SessionManager.clear(name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"No session named '{name}'"
+            )
 
 
 @app.patch("/api/sessions/{name}")
@@ -327,7 +337,7 @@ async def reset_match_history(name: SessionName) -> dict[str, Any]:
 
 @app.post("/api/sessions/{name}/checkin/{player}")
 async def check_in(
-    name: SessionName, player: str, payload: CheckInRequest = Body(default=CheckInRequest())
+    name: SessionName, player: str, payload: CheckInRequest
 ) -> dict[str, Any]:
     """Checks a candidate in, optionally flagging them as wanting a harder game."""
     async with session_lock(name):
@@ -489,9 +499,6 @@ async def set_winner(
     name: SessionName, round_index: int, court: int, payload: WinnerRequest
 ) -> dict[str, Any]:
     """Records or clears the winning side of one court."""
-    if payload.winner not in (None, 1, 2):
-        raise HTTPException(status_code=400, detail="winner must be 1, 2, or null")
-
     async with session_lock(name):
         session = load_session(name)
         try:

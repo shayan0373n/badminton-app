@@ -8,7 +8,35 @@ if SOLVER_BACKEND == "ortools":
 else:
     from optimizer import generate_one_round
 from rating_service import compute_gender_statistics, prepare_optimizer_ratings
-from session_logic import Player, RestRotationQueue
+from session_logic import ClubNightSession, Player, RestRotationQueue
+
+
+def make_session(
+    players: dict[str, Player],
+    *,
+    num_courts: int,
+    gender_stats,
+    weights=DEFAULT_WEIGHTS,
+    is_doubles: bool = True,
+    is_recorded: bool = True,
+    database_id: int | None = None,
+) -> ClubNightSession:
+    """Builds a session with `players` as candidates, all checked in, in dict order.
+
+    The defaults are for test brevity only; ClubNightSession itself has none.
+    """
+    session = ClubNightSession(
+        candidates=players,
+        num_courts=num_courts,
+        gender_stats=gender_stats,
+        weights=weights,
+        is_doubles=is_doubles,
+        is_recorded=is_recorded,
+        database_id=database_id,
+    )
+    for name in players:
+        session.check_in(name)
+    return session
 
 
 def generate_random_players(n, mu_range=(10.0, 30.0), sigma=6.0):

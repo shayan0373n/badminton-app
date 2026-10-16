@@ -7,7 +7,7 @@ instead of PuLP/Gurobi. Key improvements over the MILP approach:
 
 1. OnlyEnforceIf replaces Big-M constraints — no magic constants, no numerical instability.
 2. Native boolean logic (AddImplication, AddBoolOr) for variable linking.
-3. Integer arithmetic throughout — float ratings scaled by RATING_SCALE (1000).
+3. Integer arithmetic throughout — float ratings and weights scaled by RATING_SCALE (100).
 """
 
 import logging
@@ -403,7 +403,7 @@ def generate_one_round(
     power_obj = sum(max_team_pw[c] - min_team_pw[c] for c in range(num_courts))
 
     # Pairing: scale penalty to match rating domain
-    # RATING_SCALE / COURT_HISTORY_NORMALIZATION = 1000 / 4 = 250
+    # RATING_SCALE / COURT_HISTORY_NORMALIZATION = 100 / 4 = 25
     PAIRING_SCALE = RATING_SCALE // COURT_HISTORY_NORMALIZATION
 
     pairing_obj = sum(

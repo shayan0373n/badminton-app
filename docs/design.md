@@ -56,11 +56,11 @@ Rules (these are norms for future changes, not just descriptions):
 - Session state is **derived from `round_history`**: round number, current matches, resting players, standings, and pairing locks (`RoundRecord.required_pairs`, the pairs in force when the round was generated) are computed from it, not stored counters. None of it depends on who is checked in now, so a player who leaves keeps their games, rests and pairings in the record. Missing keys in `RoundRecord.winners_by_court` mean unreported courts.
 - `Player` models a persistent registry member: every field is persisted to the players table. Session-scoped state does not belong on it.
 - Team pairing is session state: `ClubNightSession.teams` maps player name → comma-separated team name(s), feeds `get_required_partners()`, and is never persisted to the players table. Drag-to-pair is a face on this: `pair_players()` puts two players in one generated group and never merges or grows an existing one, so a group is always exactly two people and a player may belong to several. `get_required_partners()` therefore reads as a disjunction — a player with two pairs must partner *one* of them in a given round, which is what the optimizer's satisfaction constraint enforces.
-- `player_pool` is who is **checked in**; `candidates` is who might turn up. Checking in adds a candidate to the pool (they stay a candidate); checking out removes them from the pool only. A newcomer (a guest, or a member added mid-night) becomes a candidate first and is then checked in, so the app only ever fills the pool through check-in. Presence is pool membership, so the rest queue needs no separate notion of it. Check-in state never depends on match state: checking out takes effect at once, even for a player on a court in the round in play. Rounds store names, so that round's matches and results are unaffected.
+- `player_pool` is who is **checked in**; `candidates` is who might turn up. Checking in adds a candidate to the pool (they stay a candidate); checking out removes them from the pool only. A newcomer (a guest, or a member added mid-night) becomes a candidate first and is then checked in, so the pool, which starts empty, is only ever entered through check-in. Presence is pool membership, so the rest queue needs no separate notion of it. Check-in state never depends on match state: checking out takes effect at once, even for a player on a court in the round in play. Rounds store names, so that round's matches and results are unaffected.
 - `challengers` is the set of players asking for a harder game. It persists until cleared rather than being consumed, and is dropped when a player leaves. Like `teams`, it is session-scoped and never reaches the players table.
 - Changes made between rounds never disturb the round in play. Court count, weights, pairing, and who is checked in all shape matchmaking from the next round prepared — which is what lets the check-in page double as the mid-session management screen.
 - `prior_mu`/`prior_sigma` are the season-start baseline fed into rating recalculation (set manually, or carried forward at season rollover); `mu`/`sigma` are TTT outputs that evolve with the current season's matches. `conservative_rating = mu - 3*sigma`.
-- Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results.
+- Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results. A session file that cannot be read is never deleted automatically: loading it is an error, and the session list reports it as unreadable until someone deletes it.
 
 ## Session Flow
 
@@ -121,7 +121,7 @@ means both — but it is the same mechanism challenge mode avoids, so the two
 should not be assumed to work alike.
 
 ### Solver Backends
-The `SOLVER_BACKEND` constant in `constants.py` selects between two optimizer implementations:
+The `SOLVER_BACKEND` constant in `constants.py`, set from the `SOLVER` environment variable, selects between two optimizer implementations. Any other value logs a warning and uses `"ortools"`.
 
 | Backend | Module | Solver | License |
 |---------|--------|--------|---------|
@@ -132,7 +132,7 @@ Both have identical public APIs and produce valid matches satisfying all constra
 
 **Key differences in the OR-Tools implementation:**
 - **`OnlyEnforceIf`** replaces Big-M constraints — no magic constants, no numerical instability
-- **Integer arithmetic** — float ratings (0.0–5.0) are scaled to integers (0–5000) via `RATING_SCALE = 1000`
+- **Integer arithmetic** — float ratings (0.0–5.0) are scaled to integers (0–500) via `RATING_SCALE = 100`; weights are scaled the same way, so fractional weights keep their effect
 - **Native boolean logic** (`AddImplication`, `AddBoolOr`) for variable linking
 
 ### TrueSkill Through Time

@@ -4,18 +4,13 @@ import session_service
 from constants import DEFAULT_WEIGHTS
 from exceptions import DatabaseError, SessionError
 from session_logic import ClubNightSession, Player
+from tests.utils import make_session
 from app_types import Gender
 
 
 def _make_session(sample_players, sample_gender_stats) -> ClubNightSession:
     """Builds a doubles session from the shared sample fixtures."""
-    return ClubNightSession(
-        players=dict(sample_players),
-        num_courts=1,
-        gender_stats=sample_gender_stats,
-        weights=DEFAULT_WEIGHTS,
-        is_doubles=True,
-    )
+    return make_session(dict(sample_players), num_courts=1, gender_stats=sample_gender_stats)
 
 
 @pytest.fixture
@@ -64,7 +59,6 @@ def test_add_guest_player_persists_entered_skill_as_prior(
 def test_guest_cannot_take_a_members_name(saves, registry, sample_players, sample_gender_stats):
     """A guest named like a registry member is refused, so the member's row is never overwritten."""
     session = _make_session({}, sample_gender_stats)
-    session.candidates = {}
 
     success, error = session_service.add_guest_player(
         session, "test_session", name="Alice", gender=Gender.FEMALE, mu=10.0

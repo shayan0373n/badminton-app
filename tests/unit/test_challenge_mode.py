@@ -5,7 +5,7 @@ import pickle
 import pytest
 
 from app_types import Gender
-from constants import CHALLENGE_TIER_BOOST_MU, DEFAULT_WEIGHTS
+from constants import CHALLENGE_TIER_BOOST_MU
 from rating_service import (
     compute_gender_statistics,
     compute_real_skill,
@@ -13,6 +13,7 @@ from rating_service import (
     prepare_optimizer_ratings,
 )
 from session_logic import ClubNightSession, Player
+from tests.utils import make_session
 
 
 # =============================================================================
@@ -108,13 +109,7 @@ def test_boost_lifts_a_challenger_above_a_stronger_peer(sample_gender_stats):
 
 
 def _session(players, gender_stats) -> ClubNightSession:
-    return ClubNightSession(
-        players=players,
-        num_courts=2,
-        gender_stats=gender_stats,
-        weights=DEFAULT_WEIGHTS,
-        is_doubles=True,
-    )
+    return make_session(players, num_courts=2, gender_stats=gender_stats)
 
 
 def test_new_session_has_no_challengers(sample_players, sample_gender_stats):
@@ -184,13 +179,7 @@ def _ladder_session() -> ClubNightSession:
         f"P{i}": Player(name=f"P{i}", gender=Gender.MALE, prior_mu=mu)
         for i, mu in enumerate(mus, 1)
     }
-    return ClubNightSession(
-        players=players,
-        num_courts=2,
-        gender_stats=compute_gender_statistics(players),
-        weights=DEFAULT_WEIGHTS,
-        is_doubles=True,
-    )
+    return make_session(players, num_courts=2, gender_stats=compute_gender_statistics(players))
 
 
 def _courtmate_strength(session: ClubNightSession, name: str) -> float:

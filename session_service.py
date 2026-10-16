@@ -256,14 +256,13 @@ def create_new_session(
 
     # 3. Initialize Session Object
     session = ClubNightSession(
-        players={},
+        candidates=candidates,
         num_courts=num_courts,
         gender_stats=gender_stats,
         database_id=database_id,
         weights=weights,
         is_doubles=is_doubles,
         is_recorded=is_recorded,
-        candidates=candidates,
     )
 
     # 4. Save to Disk
@@ -371,7 +370,13 @@ def _winning_side(record: RoundRecord, match) -> int | None:
     winner = record.winners_by_court.get(match.court)
     if winner is None:
         return None
-    return 1 if set(winner) == set(match.sides[0]) else 2
+    for side_number, side in enumerate(match.sides, start=1):
+        if set(winner) == set(side):
+            return side_number
+    raise SessionError(
+        f"Round {record.round_num}, court {match.court}: stored winner {winner} "
+        f"is neither side of the match"
+    )
 
 
 def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict:

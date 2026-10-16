@@ -16,6 +16,7 @@ from itertools import combinations
 
 from constants import (
     DEFAULT_WEIGHTS,
+    MAX_WEIGHT,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     SESSION_PERFORMANCE_FACTOR,
@@ -202,12 +203,18 @@ class SessionManager:
         return session
 
     @staticmethod
-    def clear(session_name: str) -> None:
-        """Clears a named session by deleting its file."""
+    def clear(session_name: str) -> bool:
+        """Deletes a named session's file, readable or not.
+
+        Returns:
+            True if a file was deleted, False if none existed.
+        """
         path = SessionManager._get_session_path(session_name)
-        if os.path.exists(path):
-            os.remove(path)
-            logger.info("Session '%s' cleared", session_name)
+        if not os.path.exists(path):
+            return False
+        os.remove(path)
+        logger.info("Session '%s' cleared", session_name)
+        return True
 
     @staticmethod
     def list_sessions() -> list[str]:
@@ -226,24 +233,33 @@ class ClubNightSession:
 
     def __init__(
         self,
-        players: dict[str, Player],
+        candidates: dict[PlayerName, Player],
         num_courts: int,
         gender_stats: GenderStats,
         weights: dict[str, float],
-        is_doubles: bool = True,
-        database_id: int | None = None,
-        is_recorded: bool = True,
-        candidates: dict[PlayerName, "Player"] | None = None,
+        is_doubles: bool,
+        is_recorded: bool,
+        database_id: int | None,
     ) -> None:
+        """Starts a session with tonight's candidates and nobody checked in.
+
+        Args:
+            candidates: Who might turn up tonight
+            num_courts: Courts available
+            gender_stats: Registry-wide gender statistics for tier ratings
+            weights: Optimizer weights; must name exactly skill, power, pairing
+            is_doubles: True for doubles, False for singles
+            is_recorded: Whether results count toward ratings
+            database_id: The session's database row, or None when not recorded
+        """
         # player_pool holds everyone currently checked in and eligible to play.
-        self.player_pool = players
+        # It starts empty: check_in is the only way in.
+        self.player_pool: dict[PlayerName, Player] = {}
         # candidates is the setup-time guest list: who might turn up tonight.
         # Checking in adds a candidate to player_pool (the same Player object,
         # so pool players must not be mutated in place); checking out removes
         # them again. Nobody is ever removed from candidates by checking out.
-        self.candidates: dict[PlayerName, "Player"] = (
-            candidates if candidates is not None else dict(players)
-        )
+        self.candidates: dict[PlayerName, Player] = dict(candidates)
         # Session-scoped team memberships: player name -> comma-separated team
         # name(s). Teams exist only for the duration of a club night.
         self.teams: dict[PlayerName, str] = {}
@@ -268,7 +284,7 @@ class ClubNightSession:
 
         # Session flow state
         self.round_history: list[RoundRecord] = []
-        self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
+        self._rest_queue = RestRotationQueue([])
         # Players who asked for a harder game. Session-scoped, like teams: a
         # challenge is a statement about tonight, not a property of the player.
         self.challengers: set[PlayerName] = set()
@@ -460,14 +476,19 @@ class ClubNightSession:
         """Changes some or all optimizer weights; applies on the next prepared round.
 
         Raises:
-            SessionError: If a key is not a known weight or a value is negative.
+            SessionError: If a key is not a known weight or a value is outside
+                0..MAX_WEIGHT (this also rejects NaN and infinity).
         """
         unknown = set(weights) - set(DEFAULT_WEIGHTS)
         if unknown:
             raise SessionError(f"Unknown weight(s): {', '.join(sorted(unknown))}")
-        negative = [key for key, value in weights.items() if value < 0]
-        if negative:
-            raise SessionError(f"Weights cannot be negative: {', '.join(sorted(negative))}")
+        out_of_range = [
+            key for key, value in weights.items() if not 0 <= value <= MAX_WEIGHT
+        ]
+        if out_of_range:
+            raise SessionError(
+                f"Weights must be between 0 and {MAX_WEIGHT}: {', '.join(sorted(out_of_range))}"
+            )
         self.weights = {**self.weights, **weights}
 
     def reset_court_history(self) -> None:

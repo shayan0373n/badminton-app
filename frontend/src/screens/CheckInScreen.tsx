@@ -51,7 +51,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
 
   function toggleCheckIn(playerName: string, isIn: boolean) {
     run(
-      () => (isIn ? api.checkOut(name, playerName) : api.checkIn(name, playerName)),
+      () => (isIn ? api.checkOut(name, playerName) : api.checkIn(name, playerName, false)),
       {
         optimistic: (s) =>
           withCandidate(s, playerName, {

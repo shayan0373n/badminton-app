@@ -4,6 +4,7 @@ Centralized constants for the Badminton App.
 This module contains all configuration constants used throughout the application.
 """
 
+import logging
 import os
 
 # =============================================================================
@@ -18,11 +19,15 @@ PLAYERS_PER_COURT_SINGLES = 2
 # =============================================================================
 # "ortools" uses Google OR-Tools CP-SAT solver (free, open source)
 # "gurobi" uses PuLP with Gurobi solver (requires commercial license)
-# Use environment variable 'SOLVER' to override the default backend; any other
-# value is an error rather than a silent fallback.
+# Use environment variable 'SOLVER' to override the default backend. Any other
+# value falls back to "ortools" with a warning in the log, so a typo cannot
+# select the commercial solver or stop the app from starting.
 SOLVER_BACKEND = os.getenv("SOLVER", "ortools").lower()
 if SOLVER_BACKEND not in ("ortools", "gurobi"):
-    raise ValueError(f"SOLVER must be 'ortools' or 'gurobi', not {SOLVER_BACKEND!r}")
+    logging.getLogger("app.constants").warning(
+        "SOLVER=%r is not 'ortools' or 'gurobi'; using 'ortools'.", SOLVER_BACKEND
+    )
+    SOLVER_BACKEND = "ortools"
 
 # =============================================================================
 # Optimizer Constants
@@ -53,6 +58,9 @@ COURT_HISTORY_NORMALIZATION = 4
 DEFAULT_NUM_COURTS = 2
 
 # Default optimizer weights (all 1 = equal importance)
+# Largest weight accepted for any objective (the UI's stepper stops here too).
+MAX_WEIGHT = 10.0
+
 DEFAULT_WEIGHTS = {
     "skill": 1,
     "power": 1,

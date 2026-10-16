@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app *.py ./
 COPY --chown=app:app database/ ./database/
+COPY --chown=app:app vendor/ ./vendor/
 COPY --chown=app:app --from=client /build/dist ./frontend/dist
 
 # Sessions are pickled here; the compose file mounts a volume so a redeploy

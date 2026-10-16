@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, date
-from trueskillthroughtime import History, Player as TTTPlayer, Gaussian
+from vendor.trueskillthroughtime import History, Player as TTTPlayer, Gaussian
 from constants import (
     TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,

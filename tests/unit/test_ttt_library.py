@@ -1,10 +1,10 @@
 """Pins the TrueSkillThroughTime calls ttt_logic relies on.
 
-The library is installed from a pinned upstream commit, so this guards the
-History / Player / learning_curves usage against an incompatible version.
+The library is vendored, so this guards the History / Player /
+learning_curves usage against changes made to our copy.
 """
 
-from trueskillthroughtime import Gaussian, History, Player
+from vendor.trueskillthroughtime import Gaussian, History, Player
 
 from constants import TTT_BETA, TTT_DEFAULT_MU, TTT_DEFAULT_SIGMA, TTT_GAMMA
 

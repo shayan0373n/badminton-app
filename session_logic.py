@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from constants import (
-    DEFAULT_IS_DOUBLES,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     SESSION_PERFORMANCE_FACTOR,
@@ -37,7 +36,6 @@ from app_types import (
     MatchList,
     CourtHistory,
     PlayerName,
-    PlayerPair,
     RequiredPartners,
     RoundRecord,
 )
@@ -561,20 +559,6 @@ class ClubNightSession:
             for name, (matches, wins) in stats.items()
         ]
         return sorted(rows, key=lambda r: (r[3], r[2]), reverse=True)
-
-    def get_persistent_state(self) -> dict:
-        """Returns session parameters to preserve across session termination.
-
-        This allows the next session to start with the same configuration.
-        """
-        return {
-            "player_pool": self.player_pool,
-            "num_courts": self.num_courts,
-            "is_doubles": self.is_doubles,
-            "is_recorded": self.is_recorded,
-            "weights": self.weights.copy(),
-            "gender_stats": self._gender_stats,
-        }
 
     def add_player(
         self,

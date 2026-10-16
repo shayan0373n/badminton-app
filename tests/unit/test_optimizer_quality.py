@@ -1,4 +1,3 @@
-import pytest
 from collections import Counter
 from itertools import combinations
 from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
@@ -109,7 +108,6 @@ def test_long_term_variety_and_stability():
                 
     # Analysis
     max_repeats = max(partnership_counts.values())
-    avg_repeats = sum(partnership_counts.values()) / len(partnership_counts)
     
     # With 12 players and 20 rounds, we expect high variety.
     # No pair should ideally repeat more than 3-4 times in 20 rounds 

@@ -1,11 +1,10 @@
-import pytest
 from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
 else:
     from optimizer import generate_one_round
-from app_types import Gender, DoublesMatch, SinglesMatch
+from app_types import Gender
 from tests.utils import generate_random_players
 
 

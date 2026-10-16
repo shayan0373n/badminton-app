@@ -3,7 +3,6 @@ import random
 import logging
 import sys
 from itertools import combinations
-import pandas as pd
 
 from constants import (
     OPTIMIZER_TIME_LIMIT,
@@ -11,12 +10,6 @@ from constants import (
 )
 from app_types import (
     Gender,
-    PlayerName,
-    PlayerPair,
-    RealSkills,
-    TierRatings,
-    PlayerGenders,
-    CourtHistory,
     DoublesMatch,
 )
 import optimizer

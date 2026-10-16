@@ -17,7 +17,6 @@ import random
 from ortools.sat.python import cp_model
 
 from constants import (
-    PARTNER_HISTORY_MULTIPLIER,
     COURT_HISTORY_NORMALIZATION,
     OPTIMIZER_TIME_LIMIT,
 )
@@ -276,7 +275,6 @@ def generate_one_round(
 
     # Scale ratings to integers
     tier_s = {p: _scale(tier_ratings[p]) for p in available_players}
-    skill_s = {p: _scale(real_skills[p]) for p in available_players}
 
     min_tier = min(tier_s.values())
     max_tier = max(tier_s.values())

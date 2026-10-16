@@ -5,7 +5,7 @@ import optimizer_ortools
 from constants import DEFAULT_WEIGHTS
 from session_logic import ClubNightSession, Player, SessionManager
 from rating_service import compute_gender_statistics
-from app_types import Gender, SinglesMatch, DoublesMatch
+from app_types import Gender, SinglesMatch
 
 
 # =============================================================================

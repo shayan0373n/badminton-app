@@ -1,8 +1,8 @@
 /**
  * Every management action for the night, in one drawer.
  *
- * This is the old Streamlit sidebar: add and remove people, change courts and
- * weights, upload results, end the session. It lives on the check-in hub so the
+ * Add and remove people, change courts and weights, upload results, end the
+ * session. It lives on the check-in hub so the
  * playing screen can stay free of controls.
  */
 

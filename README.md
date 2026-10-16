@@ -118,7 +118,7 @@ suites first and checks `/api/health` afterwards. It needs the repo secrets
 ```
 ├── api.py               # HTTP API over the service layer
 ├── frontend/            # React client (setup, check-in hub, session)
-├── config.py            # Secrets from env, falling back to secrets.toml
+├── config.py            # Secrets from env, falling back to .env
 ├── compose.yaml         # Service definition, included by the host compose project
 ├── session_logic.py     # Core session and player logic
 ├── optimizer.py         # Match generation optimization

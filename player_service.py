@@ -1,31 +1,16 @@
 """
 Service layer for player registry operations.
 
-This module handles business logic for player management, including
-conversion between Player objects and UI DataFrames, and keeping
-the cloud database in sync.
+This module keeps the cloud database in sync with edits to the player
+registry.
 """
 
 import logging
-from dataclasses import replace
 
-from app_types import Gender
 from database import PlayerDB
-from exceptions import DatabaseError
 from session_logic import Player
 
 logger = logging.getLogger("app.player_service")
-
-# Display label -> Player attribute for the registry grid, in column order.
-# Fields absent from this map are never surfaced in the grid, so they are
-# preserved as-is on save and can't be silently reset.
-REGISTRY_COLUMN_TO_FIELD = {
-    "Player Name": "name",
-    "Gender": "gender",
-    "Prior Mu": "prior_mu",
-    "Mu": "mu",
-    "Sigma": "sigma",
-}
 
 
 def sync_registry_to_database(

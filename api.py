@@ -17,7 +17,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, status
+from fastapi import Body, FastAPI, HTTPException, Path, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles

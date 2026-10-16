@@ -7,7 +7,6 @@ semantic meaning to complex type hints.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 from enum import Enum
 
 # =============================================================================
@@ -31,9 +30,6 @@ PlayerPair = tuple[PlayerName, PlayerName]
 # =============================================================================
 # Optimizer Type Aliases
 # =============================================================================
-
-# Mapping of player names to their normalized ratings (0-5 scale)
-PlayerRatings = dict[PlayerName, float]
 
 # Mapping of player names to their tier ratings (Z-score normalized, 0-5 scale)
 TierRatings = dict[PlayerName, float]

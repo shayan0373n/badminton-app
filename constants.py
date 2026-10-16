@@ -9,10 +9,6 @@ import os
 # =============================================================================
 # Game Mode Constants
 # =============================================================================
-# is_doubles=True means Doubles mode (4 players per court)
-# is_doubles=False means Singles mode (2 players per court)
-DEFAULT_IS_DOUBLES = True
-
 # Players per court by game mode
 PLAYERS_PER_COURT_DOUBLES = 4
 PLAYERS_PER_COURT_SINGLES = 2

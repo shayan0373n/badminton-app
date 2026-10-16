@@ -136,7 +136,7 @@ Both have identical public APIs and produce valid matches satisfying all constra
 - **Native boolean logic** (`AddImplication`, `AddBoolOr`) for variable linking
 
 ### TrueSkill Through Time
-- Uses the `trueskillthroughtime` package from PyPI (see `requirements.txt`); docs at https://github.com/glandfried/TrueSkillThroughTime.py
+- Uses `trueskillthroughtime` v2.0.0, installed from the upstream repository (it is not on PyPI; see `requirements.txt`); docs at https://github.com/glandfried/TrueSkillThroughTime.py
 
 ### Seasons
 - A season is a **date window**. Sessions belong to a season implicitly via their `created_at` (there is no `season_id` FK). The open season is the single `seasons` row with `end_date IS NULL`; before any season exists, all history is one implicit preseason.

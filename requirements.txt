@@ -1,8 +1,11 @@
 numpy
+scipy
 pulp
 gurobipy
 ortools
 supabase
-trueskillthroughtime
+# TrueSkillThroughTime v2.0.0 is not on PyPI; this is the upstream v2.0.0 tag's
+# commit. It imports numpy and scipy without declaring them, hence both above.
+trueskillthroughtime @ https://github.com/glandfried/TrueSkillThroughTime.py/archive/90c8cb4d83db9313ad4f689c083e1c758e2cc9ef.zip
 fastapi
 uvicorn[standard]

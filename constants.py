@@ -20,12 +20,11 @@ PLAYERS_PER_COURT_SINGLES = 2
 # "ortools" uses Google OR-Tools CP-SAT solver (free, open source)
 # "gurobi" uses PuLP with Gurobi solver (requires commercial license)
 # Use environment variable 'SOLVER' to override the default backend. Any other
-# value falls back to "ortools" with a warning in the log, so a typo cannot
-# select the commercial solver or stop the app from starting.
+# value falls back to "ortools" with a warning.
 SOLVER_BACKEND = os.getenv("SOLVER", "ortools").lower()
 if SOLVER_BACKEND not in ("ortools", "gurobi"):
     logging.getLogger("app.constants").warning(
-        "SOLVER=%r is not 'ortools' or 'gurobi'; using 'ortools'.", SOLVER_BACKEND
+        "Unsupported solver '%s', defaulting to ortools", SOLVER_BACKEND
     )
     SOLVER_BACKEND = "ortools"
 

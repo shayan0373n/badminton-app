@@ -40,7 +40,8 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
   const [guestMu, setGuestMu] = useState("25");
   const [courts, setCourts] = useState(session.num_courts);
   const [weights, setWeights] = useState<Record<string, number>>(session.weights);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
   const name = session.name;
@@ -75,18 +76,29 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
   const searching = registryFilter.trim().length > 0;
   const listed = searching || available.length <= REGISTRY_LIST_MAX ? available : [];
 
+  const hasResults = session.rounds.some((r) => r.matches.some((m) => m.winner !== null));
+
+  /** Uploads the night's results and reports the outcome beside the button. */
   async function submitResults() {
-    setNotice(null);
-    try {
-      const result = await api.submit(name);
-      setNotice(
-        `Uploaded ${result.recorded} match${result.recorded === 1 ? "" : "es"}` +
-          (result.unreported > 0 ? ` · ${result.unreported} without a winner` : ""),
-      );
-      await run(() => api.getSession(name));
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Upload failed.");
-    }
+    setUploadNote(null);
+    setUploading(true);
+    await run(
+      async () => {
+        try {
+          const result = await api.submit(name);
+          setUploadNote(
+            `Uploaded ${result.recorded} match${result.recorded === 1 ? "" : "es"}` +
+              (result.unreported > 0 ? ` · ${result.unreported} without a winner` : ""),
+          );
+          return result.session;
+        } catch (e) {
+          setUploadNote(e instanceof Error ? e.message : "Upload failed.");
+          throw e;
+        }
+      },
+      { blocking: true },
+    );
+    setUploading(false);
   }
 
   return (
@@ -99,8 +111,6 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
             ✕
           </button>
         </div>
-
-        {notice && <div className="banner banner-info">{notice}</div>}
 
         <section className="section">
           <div className="section-head">
@@ -279,10 +289,14 @@ export function SideMenu({ session, busy, run, onClose, onExit }: Props) {
               <h2>Results</h2>
             </div>
             <button className="btn btn-lg" onClick={submitResults} disabled={busy}>
-              Upload results
+              {uploading ? "Uploading…" : "Upload results"}
             </button>
-            {session.results_dirty && (
+            {uploadNote ? (
+              <p className="hint">{uploadNote}</p>
+            ) : session.results_dirty ? (
               <p className="hint">Not uploaded yet.</p>
+            ) : (
+              hasResults && <p className="hint">Uploaded ✓</p>
             )}
           </section>
         )}

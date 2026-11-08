@@ -2,18 +2,18 @@
 Service layer for orchestrating session operations that involve both
 domain logic and database interactions.
 
-This module sits between the UI (pages) and the lower-level logic/database modules,
+This module sits between the HTTP API and the lower-level logic/database modules,
 ensuring that business rules are applied consistently regardless of where
-the operation is initiated (UI or Tests).
+the operation is initiated (API or tests).
 """
 
 import logging
 from collections import defaultdict
 
 from database import MatchDB, PlayerDB, SessionDB
-from exceptions import DatabaseError
+from exceptions import DatabaseError, SessionError
 from rating_service import compute_gender_statistics
-from session_logic import ClubNightSession, DoublesMatch, Player, SessionManager
+from session_logic import ClubNightSession, Player, SessionManager
 from app_types import Gender, RoundRecord
 
 logger = logging.getLogger("app.session_service")
@@ -29,161 +29,133 @@ def _record_round_to_database(session: ClubNightSession, record: RoundRecord) ->
     """
     recorded = 0
     for match in record.matches:
-        court_num = match.court
-        winner = record.winners_by_court.get(court_num)
-        if not winner:
+        winning_side = _winning_side(record, match)
+        if winning_side is None:
             continue
 
+        side_1, side_2 = match.sides
         if session.is_doubles:
-            team_1, team_2 = match.team_1, match.team_2
-            winner_side = 1 if set(winner) == set(team_1) else 2
             MatchDB.add_match(
                 session_id=session.database_id,
-                player_1=team_1[0],
-                player_2=team_1[1],
-                winner_side=winner_side,
-                player_3=team_2[0],
-                player_4=team_2[1],
+                player_1=side_1[0],
+                player_2=side_1[1],
+                winner_side=winning_side,
+                player_3=side_2[0],
+                player_4=side_2[1],
             )
         else:
-            p1, p2 = match.player_1, match.player_2
-            winner_side = 1 if winner[0] == p1 else 2
             MatchDB.add_match(
                 session_id=session.database_id,
-                player_1=p1,
-                player_2=p2,
-                winner_side=winner_side,
+                player_1=side_1[0],
+                player_2=side_2[0],
+                winner_side=winning_side,
             )
         recorded += 1
 
     return recorded
 
 
-def add_player_from_registry(
-    session: ClubNightSession,
-    session_name: str,
-    player: Player,
-    team_name: str = "",
+def add_candidate(
+    session: ClubNightSession, session_name: str, player: Player
 ) -> bool:
-    """
-    Adds a player from the registry to the current session and persists state.
-
-    Args:
-        session: The active session
-        session_name: Name of the session
-        player: The player object from the registry
-        team_name: Optional team name for doubles
+    """Adds a registry member to tonight's list without checking them in, and persists.
 
     Returns:
-        True if added successfully, False if player already exists in session.
+        True if added, False if they were already on the list.
     """
-    added = session.add_player(
-        name=player.name,
-        gender=player.gender,
-        prior_mu=player.prior_mu,
-        prior_sigma=player.prior_sigma,
-        mu=player.mu,
-        sigma=player.sigma,
-        team_name=team_name,
-    )
-
+    added = session.add_candidate(player)
     if added:
         SessionManager.save(session, session_name)
-
     return added
+
+
+def remove_candidate(
+    session: ClubNightSession, session_name: str, player_name: str
+) -> bool:
+    """Drops someone from tonight's list, checking them out first, and persists.
+
+    Returns:
+        True if removed, False if they were not on the list.
+    """
+    removed = session.remove_candidate(player_name)
+    if removed:
+        SessionManager.save(session, session_name)
+    return removed
 
 
 def add_guest_player(
     session: ClubNightSession,
+    session_name: str,
     name: str,
     gender: Gender,
     mu: float,
-    team_name: str = "",
 ) -> tuple[bool, str | None]:
     """
-    Adds a guest player to the session and syncs them to the database.
+    Creates a guest, saves them to the registry, checks them in, and persists.
 
     Args:
         session: The active session
+        session_name: Name of the session (for saving)
         name: Name of the guest
         gender: Gender of the guest
         mu: Initial skill rating
-        team_name: Optional team name
+
+    A name that already belongs to a registry member is refused: saving the
+    guest would overwrite that member's rating. Add the member instead.
 
     Returns:
-        Tuple of (success, error_message).
-        If success is True, error_message is None (or a warning).
+        Tuple of (success, error_message); error_message is None on success.
+
+    Raises:
+        DatabaseError: If the registry cannot be read.
     """
-    guest = Player(
-        name=name,
-        gender=gender,
-        prior_mu=mu,
-    )
+    if name in session.candidates:
+        return False, f"{name} is already on tonight's list"
+    if name in PlayerDB.get_all_players():
+        return False, f"{name} is already a member; add them from the member list instead"
 
-    added = session.add_player(
-        name=guest.name,
-        gender=guest.gender,
-        prior_mu=guest.prior_mu,
-        prior_sigma=guest.prior_sigma,
-        mu=guest.mu,
-        sigma=guest.sigma,
-        team_name=team_name,
-    )
-
-    if not added:
-        return False, "Player already exists"
+    guest = Player(name=name, gender=gender, prior_mu=mu)
+    session.add_candidate(guest)
 
     # Sync to cloud registry
     try:
         PlayerDB.upsert_players({guest.name: guest})
     except DatabaseError as e:
         logger.error(f"Failed to sync guest {name} to cloud: {e}. Rolling back.")
-        session.remove_player(guest.name)
+        session.remove_candidate(guest.name)
         return False, f"Failed to sync to database: {e}"
 
+    if not session.check_in(guest.name):
+        raise SessionError(f"Guest '{guest.name}' was added but could not be checked in")
+    SessionManager.save(session, session_name)
     return True, None
 
 
-def update_court_count(
-    session: ClubNightSession, session_name: str, new_count: int
-) -> None:
-    """
-    Updates the number of courts and persists the change.
-
-    Args:
-        session: The active session
-        session_name: Name of the session (for saving)
-        new_count: New number of courts
-    """
-    # 1. Modify session state
-    session.update_courts(new_count)
-
-    # 2. Persist state
-    SessionManager.save(session, session_name)
-
-
-def update_weights(
+def update_settings(
     session: ClubNightSession,
     session_name: str,
-    skill: float,
-    power: float,
-    pairing: float,
+    num_courts: int | None = None,
+    weights: dict[str, float] | None = None,
 ) -> None:
     """
-    Updates the optimizer weights and persists the change.
+    Changes the court count and/or optimizer weights, and persists once.
+
+    Both take effect from the next prepared round.
 
     Args:
         session: The active session
         session_name: Name of the session (for saving)
-        skill: Weight for skill balance objective
-        power: Weight for team power balance objective
-        pairing: Weight for court history/pairing variety objective
+        num_courts: New number of courts, or None to leave unchanged
+        weights: Weights to override ("skill", "power", "pairing"); others are kept
+
+    Raises:
+        SessionError: If num_courts is below 1, or a weight is unknown or
+            negative. Nothing is saved in that case.
     """
-    session.weights = {
-        "skill": skill,
-        "power": power,
-        "pairing": pairing,
-    }
+    if weights is not None:
+        session.update_weights(weights)
+    if num_courts is not None:
+        session.update_courts(num_courts)
     SessionManager.save(session, session_name)
 
 
@@ -208,10 +180,14 @@ def save_court_result(
     session_name: str,
     round_idx: int,
     court_num: int,
-    winner: tuple[str, ...] | None,
+    winning_side: int | None,
 ) -> None:
-    """Saves a single court result. Standings derive from round_history on read."""
-    session.set_court_result(round_idx, court_num, winner)
+    """Saves a single court result. Standings derive from round_history on read.
+
+    Raises:
+        SessionError: If the round, court or side does not exist.
+    """
+    session.set_court_result(round_idx, court_num, winning_side)
     SessionManager.save(session, session_name)
 
 
@@ -246,29 +222,22 @@ def submit_session_results(
 
 
 def create_new_session(
-    player_table: dict[str, Player],
-    num_courts: int,
-    weights: dict,
     session_name: str,
+    candidates: dict[str, Player],
+    num_courts: int,
+    weights: dict[str, float],
     is_doubles: bool,
-    is_recorded: bool = True,
-    teams: dict[str, str] | None = None,
-    candidates: dict[str, Player] | None = None,
-    prepare_first_round: bool = True,
+    is_recorded: bool,
 ) -> ClubNightSession:
     """
-    Creates and initializes a new session.
+    Creates a session with tonight's candidates and nobody checked in yet.
 
     1. Computes gender statistics from all registered players
     2. Creates session record in Database (if recorded)
     3. Initializes ClubNightSession object
-    4. Prepares the first round, unless the caller checks players in first
-    5. Saves session to disk
+    4. Saves session to disk
 
-    Args:
-        player_table: Players already in the pool; empty for a check-in flow
-        candidates: Who might turn up tonight; defaults to player_table
-        prepare_first_round: False when a check-in page runs before round one
+    Round one is generated later, once players have checked in.
 
     Returns:
         The initialized ClubNightSession object.
@@ -287,22 +256,16 @@ def create_new_session(
 
     # 3. Initialize Session Object
     session = ClubNightSession(
-        players=player_table,
+        candidates=candidates,
         num_courts=num_courts,
         gender_stats=gender_stats,
         database_id=database_id,
         weights=weights,
         is_doubles=is_doubles,
         is_recorded=is_recorded,
-        teams=teams,
-        candidates=candidates,
     )
 
-    # 4. Prepare First Round
-    if prepare_first_round:
-        session.prepare_round()
-
-    # 5. Save to Disk
+    # 4. Save to Disk
     SessionManager.save(session, session_name)
 
     return session
@@ -402,11 +365,18 @@ def dissolve_group(
 # =============================================================================
 
 
-def _match_sides(match) -> tuple[list[str], list[str]]:
-    """Returns both sides of a match as name lists, uniform across game modes."""
-    if isinstance(match, DoublesMatch):
-        return list(match.team_1), list(match.team_2)
-    return [match.player_1], [match.player_2]
+def _winning_side(record: RoundRecord, match) -> int | None:
+    """Returns 1 or 2 for the side that won this match, or None if unreported."""
+    winner = record.winners_by_court.get(match.court)
+    if winner is None:
+        return None
+    for side_number, side in enumerate(match.sides, start=1):
+        if set(winner) == set(side):
+            return side_number
+    raise SessionError(
+        f"Round {record.round_num}, court {match.court}: stored winner {winner} "
+        f"is neither side of the match"
+    )
 
 
 def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict:
@@ -427,17 +397,15 @@ def build_session_snapshot(session: ClubNightSession, session_name: str) -> dict
     for record in session.round_history:
         matches = []
         for match in record.matches:
-            side_1, side_2 = _match_sides(match)
-            stored = record.winners_by_court.get(match.court)
-            winner = None if stored is None else (1 if set(stored) == set(side_1) else 2)
+            side_1, side_2 = match.sides
             matches.append(
                 {
                     "court": match.court,
-                    "team_1": side_1,
-                    "team_2": side_2,
+                    "team_1": list(side_1),
+                    "team_2": list(side_2),
                     "locked_1": tuple(sorted(side_1)) in record.required_pairs,
                     "locked_2": tuple(sorted(side_2)) in record.required_pairs,
-                    "winner": winner,
+                    "winner": _winning_side(record, match),
                 }
             )
         rounds.append(

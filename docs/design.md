@@ -20,7 +20,7 @@ The app follows a **layered architecture** with clear separation of concerns:
 │       (Routing and serialization only, no logic)         │
 ├─────────────────────────────────────────────────────────┤
 │                    Service Layer                         │
-│  session_service.py, player_service.py, rating_service.py│
+│  session_service.py, season_service.py, rating_service.py│
 │   (Orchestrates domain logic + database interactions)    │
 ├─────────────────────────────────────────────────────────┤
 │                    Domain Layer                          │
@@ -44,7 +44,7 @@ Rules (these are norms for future changes, not just descriptions):
 
 ## Conventions
 
-- **Error handling** — Database operations raise `DatabaseError` (from `exceptions.py`); Supabase exceptions are wrapped, never exposed to higher layers. The UI catches errors and displays them via `st.error()`.
+- **Error handling** — Database operations raise `DatabaseError` (from `exceptions.py`); Supabase exceptions are wrapped, never exposed to higher layers. The API turns domain and database errors into HTTP error responses, and the client shows their message.
 - **Type hints** — Extensive throughout; use the aliases in `app_types.py` (`PlayerName`, `PlayerPair`, `CourtHistory`, …).
 - **Logging** — `logging.getLogger("app.<module_name>")`, configured via `logger.setup_logging()`.
 - **Defaults** — All configuration constants live in `constants.py`.
@@ -56,11 +56,11 @@ Rules (these are norms for future changes, not just descriptions):
 - Session state is **derived from `round_history`**: round number, current matches, resting players, standings, and pairing locks (`RoundRecord.required_pairs`, the pairs in force when the round was generated) are computed from it, not stored counters. None of it depends on who is checked in now, so a player who leaves keeps their games, rests and pairings in the record. Missing keys in `RoundRecord.winners_by_court` mean unreported courts.
 - `Player` models a persistent registry member: every field is persisted to the players table. Session-scoped state does not belong on it.
 - Team pairing is session state: `ClubNightSession.teams` maps player name → comma-separated team name(s), feeds `get_required_partners()`, and is never persisted to the players table. Drag-to-pair is a face on this: `pair_players()` puts two players in one generated group and never merges or grows an existing one, so a group is always exactly two people and a player may belong to several. `get_required_partners()` therefore reads as a disjunction — a player with two pairs must partner *one* of them in a given round, which is what the optimizer's satisfaction constraint enforces.
-- `player_pool` is who is **checked in**; `candidates` is who might turn up. Checking in copies a candidate into the pool via `add_player`; checking out removes them and leaves them a candidate. Presence is pool membership, so the rest queue needs no separate notion of it. Check-in state never depends on match state: checking out takes effect at once, even for a player on a court in the round in play. Rounds store names, so that round's matches and results are unaffected.
+- `player_pool` is who is **checked in**; `candidates` is who might turn up. The pool starts empty and check-in is the only way in, so a newcomer (guest or late member) becomes a candidate first; checking out leaves them a candidate. Presence is pool membership, so the rest queue needs no separate notion of it. Check-in state never depends on match state: checking out takes effect at once, even for a player on a court in the round in play. Rounds store names, so that round's matches and results are unaffected.
 - `challengers` is the set of players asking for a harder game. It persists until cleared rather than being consumed, and is dropped when a player leaves. Like `teams`, it is session-scoped and never reaches the players table.
 - Changes made between rounds never disturb the round in play. Court count, weights, pairing, and who is checked in all shape matchmaking from the next round prepared — which is what lets the check-in page double as the mid-session management screen.
 - `prior_mu`/`prior_sigma` are the season-start baseline fed into rating recalculation (set manually, or carried forward at season rollover); `mu`/`sigma` are TTT outputs that evolve with the current season's matches. `conservative_rating = mu - 3*sigma`.
-- Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results.
+- Sessions persist as pickles in `sessions/` via `SessionManager`; the database records only players, sessions, and match results. An unreadable session file is reported, never deleted automatically.
 
 ## Session Flow
 
@@ -121,7 +121,7 @@ means both — but it is the same mechanism challenge mode avoids, so the two
 should not be assumed to work alike.
 
 ### Solver Backends
-The `SOLVER_BACKEND` constant in `constants.py` selects between two optimizer implementations:
+The `SOLVER` environment variable selects between two optimizer implementations; an unsupported value falls back to `"ortools"`.
 
 | Backend | Module | Solver | License |
 |---------|--------|--------|---------|
@@ -132,11 +132,11 @@ Both have identical public APIs and produce valid matches satisfying all constra
 
 **Key differences in the OR-Tools implementation:**
 - **`OnlyEnforceIf`** replaces Big-M constraints — no magic constants, no numerical instability
-- **Integer arithmetic** — float ratings (0.0–5.0) are scaled to integers (0–5000) via `RATING_SCALE = 1000`
+- **Integer arithmetic** — float ratings (0.0–5.0) and weights are scaled to integers via `RATING_SCALE = 100`
 - **Native boolean logic** (`AddImplication`, `AddBoolOr`) for variable linking
 
 ### TrueSkill Through Time
-- Uses the local `TrueSkillThroughTime.py/` library; docs in its `README.md`, `RELEASE.md`, and `examples/`
+- Uses TrueSkillThroughTime v2.0.0, vendored in `vendor/trueskillthroughtime/` (BSD license kept beside it): upstream is inactive and v2 is not on PyPI. Upstream docs: https://github.com/glandfried/TrueSkillThroughTime.py
 
 ### Seasons
 - A season is a **date window**. Sessions belong to a season implicitly via their `created_at` (there is no `season_id` FK). The open season is the single `seasons` row with `end_date IS NULL`; before any season exists, all history is one implicit preseason.

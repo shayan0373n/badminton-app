@@ -41,12 +41,19 @@ export interface Standing {
   ratio: number;
 }
 
+/** Optimizer weights; the server always sends all three. */
+export interface Weights {
+  skill: number;
+  power: number;
+  pairing: number;
+}
+
 export interface Session {
   name: string;
   is_doubles: boolean;
   is_recorded: boolean;
   num_courts: number;
-  weights: Record<string, number>;
+  weights: Weights;
   round_num: number;
   results_dirty: boolean;
   candidates: Candidate[];

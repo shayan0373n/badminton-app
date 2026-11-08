@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS public.matches (
 -- RLS, so the app must connect with a secret key (sb_secret_*, which maps to
 -- service_role); a publishable key gets nothing. That applies to the deployed
 -- app and to the standalone scripts alike -- recalculate_ratings.py and
--- start_new_season.py read the same SUPABASE_KEY from a local secrets.toml.
+-- start_new_season.py read the same SUPABASE_KEY via config.py.
 --
 -- Two independent layers, either of which alone would suffice:
 --   1. RLS on with zero policies -- every row is filtered out for anon.

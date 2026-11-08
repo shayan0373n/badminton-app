@@ -1,9 +1,9 @@
+# numpy and scipy are used by the vendored TrueSkillThroughTime (vendor/).
 numpy
-pandas
+scipy
 pulp
 gurobipy
 ortools
 supabase
-trueskillthroughtime
 fastapi
 uvicorn[standard]

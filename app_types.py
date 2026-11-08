@@ -7,7 +7,6 @@ semantic meaning to complex type hints.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 from enum import Enum
 
 # =============================================================================
@@ -31,9 +30,6 @@ PlayerPair = tuple[PlayerName, PlayerName]
 # =============================================================================
 # Optimizer Type Aliases
 # =============================================================================
-
-# Mapping of player names to their normalized ratings (0-5 scale)
-PlayerRatings = dict[PlayerName, float]
 
 # Mapping of player names to their tier ratings (Z-score normalized, 0-5 scale)
 TierRatings = dict[PlayerName, float]
@@ -74,6 +70,11 @@ class SinglesMatch:
     player_1: PlayerName
     player_2: PlayerName
 
+    @property
+    def sides(self) -> tuple[tuple[PlayerName, ...], tuple[PlayerName, ...]]:
+        """Both sides of the net, uniform across game modes."""
+        return (self.player_1,), (self.player_2,)
+
 
 @dataclass
 class DoublesMatch:
@@ -88,6 +89,11 @@ class DoublesMatch:
     court: int
     team_1: PlayerPair
     team_2: PlayerPair
+
+    @property
+    def sides(self) -> tuple[tuple[PlayerName, ...], tuple[PlayerName, ...]]:
+        """Both sides of the net, uniform across game modes."""
+        return tuple(self.team_1), tuple(self.team_2)
 
 
 # A single match assignment

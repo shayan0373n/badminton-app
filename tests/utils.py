@@ -1,23 +1,42 @@
 import random
 from typing import Generator
 
-from app_types import Gender, OptimizerResult, RequiredPartners, TierRatings, RealSkills
+from app_types import Gender, OptimizerResult, RequiredPartners
 from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round
 else:
     from optimizer import generate_one_round
 from rating_service import compute_gender_statistics, prepare_optimizer_ratings
-from session_logic import Player, RestRotationQueue
+from session_logic import ClubNightSession, Player, RestRotationQueue
 
 
-def get_optimizer(backend: str):
-    """Returns the generate_one_round function for the specified backend."""
-    if backend == "ortools":
-        from optimizer_ortools import generate_one_round
-    else:
-        from optimizer import generate_one_round
-    return generate_one_round
+def make_session(
+    players: dict[str, Player],
+    *,
+    num_courts: int,
+    gender_stats,
+    weights=DEFAULT_WEIGHTS,
+    is_doubles: bool = True,
+    is_recorded: bool = True,
+    database_id: int | None = None,
+) -> ClubNightSession:
+    """Builds a session with `players` as candidates, all checked in, in dict order.
+
+    The defaults are for test brevity only; ClubNightSession itself has none.
+    """
+    session = ClubNightSession(
+        candidates=players,
+        num_courts=num_courts,
+        gender_stats=gender_stats,
+        weights=weights,
+        is_doubles=is_doubles,
+        is_recorded=is_recorded,
+        database_id=database_id,
+    )
+    for name in players:
+        session.check_in(name)
+    return session
 
 
 def generate_random_players(n, mu_range=(10.0, 30.0), sigma=6.0):

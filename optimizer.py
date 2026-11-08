@@ -7,15 +7,12 @@ balancing skill levels, power balance, and pairing history.
 """
 
 import logging
-from collections import defaultdict
 from itertools import combinations
 import random
 
 import pulp
 
 from constants import (
-    OPTIMIZER_RANK_MIN,
-    OPTIMIZER_RANK_MAX,
     OPTIMIZER_BIG_M,
     PARTNER_HISTORY_MULTIPLIER,
     COURT_HISTORY_NORMALIZATION,
@@ -23,7 +20,6 @@ from constants import (
 )
 from logger import log_optimizer_debug
 from app_types import (
-    MatchList,
     OptimizerResult,
     CourtHistory,
     PlayerGenders,

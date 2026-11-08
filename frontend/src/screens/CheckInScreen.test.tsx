@@ -93,7 +93,7 @@ describe("CheckInScreen", () => {
     fireEvent.pointerUp(box("Alice"));
     fireEvent.click(box("Alice"));
 
-    await waitFor(() => expect(api.checkIn).toHaveBeenCalledWith("Night", "Alice"));
+    await waitFor(() => expect(api.checkIn).toHaveBeenCalledWith("Night", "Alice", false));
     expect(api.checkOut).not.toHaveBeenCalled();
   });
 

@@ -10,10 +10,11 @@ Key Concepts:
 - Game: Models a single match between teams
 - History: Tracks multiple games over time and computes skill evolution
 
-Install with: pip install -e ./TrueSkillThroughTime.py  (from cloned repo for v2.0.0)
+Uses the copy vendored in ./vendor/trueskillthroughtime; run from the repo root:
+    python -m examples.trueskill_through_time_example
 """
 
-from trueskillthroughtime import History, Player, Gaussian, Game
+from vendor.trueskillthroughtime import History, Player, Gaussian, Game
 
 
 def example_1_basic_game():

@@ -61,8 +61,17 @@ def client(tmp_path, monkeypatch, registry):
         yield c
 
 
+# Every field the client must send when creating a session.
+SESSION_SETTINGS = {"num_courts": 2, "is_doubles": True, "is_recorded": True}
+
+
 def create(client, name="Night", candidates=None, **kwargs) -> dict:
-    body = {"name": name, "candidates": candidates or list(REGISTRY_MU), **kwargs}
+    body = {
+        "name": name,
+        "candidates": candidates or list(REGISTRY_MU),
+        **SESSION_SETTINGS,
+        **kwargs,
+    }
     response = client.post("/api/sessions", json=body)
     assert response.status_code == 201, response.text
     return response.json()
@@ -71,7 +80,7 @@ def create(client, name="Night", candidates=None, **kwargs) -> dict:
 def check_in_all(client, name="Night", players=None) -> dict:
     snapshot = {}
     for player in players or list(REGISTRY_MU):
-        response = client.post(f"/api/sessions/{name}/checkin/{player}")
+        response = client.post(f"/api/sessions/{name}/checkin/{player}", json={"wants_challenge": False})
         assert response.status_code == 200, response.text
         snapshot = response.json()
     return snapshot
@@ -130,21 +139,21 @@ def test_create_session_starts_with_nobody_checked_in(client):
 def test_create_rejects_duplicate_name(client):
     create(client)
     response = client.post(
-        "/api/sessions", json={"name": "Night", "candidates": ["Alice"]}
+        "/api/sessions", json={"name": "Night", "candidates": ["Alice"], **SESSION_SETTINGS}
     )
     assert response.status_code == 409
 
 
 def test_create_rejects_unknown_candidate(client):
     response = client.post(
-        "/api/sessions", json={"name": "Night", "candidates": ["Nobody"]}
+        "/api/sessions", json={"name": "Night", "candidates": ["Nobody"], **SESSION_SETTINGS}
     )
     assert response.status_code == 400
     assert "Nobody" in response.json()["detail"]
 
 
 def test_create_rejects_empty_candidate_list(client):
-    response = client.post("/api/sessions", json={"name": "Night", "candidates": []})
+    response = client.post("/api/sessions", json={"name": "Night", "candidates": [], **SESSION_SETTINGS})
     assert response.status_code == 422
 
 
@@ -171,7 +180,7 @@ def test_list_and_delete_sessions(client):
 
 def test_check_in_puts_a_player_in_the_pool(client):
     create(client)
-    snapshot = client.post("/api/sessions/Night/checkin/Alice").json()
+    snapshot = client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False}).json()
 
     alice = next(c for c in snapshot["candidates"] if c["name"] == "Alice")
     assert alice["checked_in"] is True
@@ -191,18 +200,18 @@ def test_long_press_checks_in_with_challenge(client):
 
 def test_double_check_in_conflicts(client):
     create(client)
-    client.post("/api/sessions/Night/checkin/Alice")
-    assert client.post("/api/sessions/Night/checkin/Alice").status_code == 409
+    client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False})
+    assert client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False}).status_code == 409
 
 
 def test_check_in_unknown_player_conflicts(client):
     create(client, candidates=["Alice", "Bob"])
-    assert client.post("/api/sessions/Night/checkin/Charlie").status_code == 409
+    assert client.post("/api/sessions/Night/checkin/Charlie", json={"wants_challenge": False}).status_code == 409
 
 
 def test_check_out_returns_them_to_the_candidate_list(client):
     create(client)
-    client.post("/api/sessions/Night/checkin/Alice")
+    client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False})
     snapshot = client.delete("/api/sessions/Night/checkin/Alice").json()
 
     alice = next(c for c in snapshot["candidates"] if c["name"] == "Alice")
@@ -234,7 +243,7 @@ def test_check_out_when_not_checked_in_is_404(client):
 
 def test_challenge_can_be_toggled_after_check_in(client):
     create(client)
-    client.post("/api/sessions/Night/checkin/Alice")
+    client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False})
 
     on = client.post(
         "/api/sessions/Night/challenge/Alice", json={"wants_challenge": True}
@@ -522,7 +531,7 @@ def test_winner_must_be_one_or_two(client):
     response = client.put(
         f"/api/sessions/Night/rounds/0/courts/{court}", json={"winner": 3}
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_unknown_round_or_court_is_404(client):
@@ -593,7 +602,7 @@ def test_candidate_can_be_added_and_removed(client):
 
 def test_removing_a_checked_in_candidate_checks_them_out_first(client):
     create(client, candidates=["Alice", "Bob"])
-    client.post("/api/sessions/Night/checkin/Alice")
+    client.post("/api/sessions/Night/checkin/Alice", json={"wants_challenge": False})
 
     snapshot = client.delete("/api/sessions/Night/candidates/Alice").json()
 
@@ -613,3 +622,86 @@ def test_guest_is_created_and_checked_in(client):
 
 def test_health(client):
     assert client.get("/api/health").json() == {"status": "ok"}
+
+
+def test_session_name_cannot_leave_the_sessions_folder(client):
+    for bad in ["../escape", "a/b", ".hidden"]:
+        response = client.post(
+            "/api/sessions", json={"name": bad, "candidates": ["Alice"], **SESSION_SETTINGS}
+        )
+        assert response.status_code == 422, bad
+
+
+def test_create_requires_explicit_settings(client):
+    response = client.post("/api/sessions", json={"name": "Night", "candidates": ["Alice"]})
+    assert response.status_code == 422
+
+
+def test_create_with_partial_weights_is_rejected(client):
+    response = client.post(
+        "/api/sessions",
+        json={"name": "Night", "candidates": ["Alice"], **SESSION_SETTINGS, "weights": {"skill": 2}},
+    )
+    assert response.status_code == 422
+
+
+def test_unknown_weight_is_rejected(client):
+    create(client)
+    response = client.patch("/api/sessions/Night", json={"weights": {"skil": 2}})
+    assert response.status_code == 422
+
+
+def test_guest_requires_gender_and_skill(client):
+    create(client)
+    response = client.post("/api/sessions/Night/players", json={"name": "Zoe"})
+    assert response.status_code == 422
+
+
+def test_unreadable_session_file_is_kept_and_reported(client, tmp_path):
+    create(client)
+    path = tmp_path / "sessions" / "Night.pkl"
+    path.write_bytes(b"not a pickle")
+
+    assert client.get("/api/sessions/Night").status_code == 500
+    listing = client.get("/api/sessions").json()
+    assert listing["sessions"] == []
+    assert listing["unreadable"] == ["Night"]
+    assert path.read_bytes() == b"not a pickle"
+
+    # Its name stays taken until it is deleted, which works without loading it.
+    response = client.post(
+        "/api/sessions", json={"name": "Night", "candidates": ["Alice"], **SESSION_SETTINGS}
+    )
+    assert response.status_code == 409
+    assert client.delete("/api/sessions/Night").status_code == 204
+    assert not path.exists()
+    assert client.get("/api/sessions").json()["unreadable"] == []
+
+
+def test_deleting_a_missing_session_is_404(client):
+    assert client.delete("/api/sessions/Nope").status_code == 404
+
+
+def test_winner_must_be_given_explicitly(client):
+    create(client)
+    check_in_all(client)
+    snapshot = client.post("/api/sessions/Night/rounds").json()
+    court = snapshot["rounds"][0]["matches"][0]["court"]
+    client.put(f"/api/sessions/Night/rounds/0/courts/{court}", json={"winner": 1})
+
+    response = client.put(f"/api/sessions/Night/rounds/0/courts/{court}", json={})
+
+    assert response.status_code == 422
+    match = client.get("/api/sessions/Night").json()["rounds"][0]["matches"][0]
+    assert match["winner"] == 1
+
+
+def test_check_in_requires_explicit_challenge_flag(client):
+    create(client)
+    assert client.post("/api/sessions/Night/checkin/Alice").status_code == 422
+
+
+def test_weights_above_the_maximum_are_rejected(client):
+    create(client)
+    response = client.patch("/api/sessions/Night", json={"weights": {"skill": 11}})
+    assert response.status_code == 422

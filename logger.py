@@ -3,7 +3,7 @@
 Logging configuration for the Badminton App.
 
 This module provides centralized logging setup. The setup_logging() function
-should be called once at application startup (e.g., in main.py or 1_Setup.py).
+should be called once at application startup (api.py and the command-line scripts do).
 
 All app modules should use the "app" namespace:
     import logging

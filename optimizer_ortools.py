@@ -7,7 +7,7 @@ instead of PuLP/Gurobi. Key improvements over the MILP approach:
 
 1. OnlyEnforceIf replaces Big-M constraints — no magic constants, no numerical instability.
 2. Native boolean logic (AddImplication, AddBoolOr) for variable linking.
-3. Integer arithmetic throughout — float ratings scaled by RATING_SCALE (1000).
+3. Integer arithmetic throughout — float ratings and weights scaled by RATING_SCALE (100).
 """
 
 import logging
@@ -17,7 +17,6 @@ import random
 from ortools.sat.python import cp_model
 
 from constants import (
-    PARTNER_HISTORY_MULTIPLIER,
     COURT_HISTORY_NORMALIZATION,
     OPTIMIZER_TIME_LIMIT,
 )
@@ -86,8 +85,8 @@ def generate_singles_round(
     skill_s = {p: _scale(real_skills[p]) for p in available_players}
     min_possible = min(skill_s.values())
     max_possible = max(skill_s.values())
-    w_skill = int(weights["skill"])
-    w_pairing = int(weights["pairing"])
+    w_skill = _scale(weights["skill"])
+    w_pairing = _scale(weights["pairing"])
 
     # --- Variables ---
     # x[p, c]: player p is on court c
@@ -276,15 +275,14 @@ def generate_one_round(
 
     # Scale ratings to integers
     tier_s = {p: _scale(tier_ratings[p]) for p in available_players}
-    skill_s = {p: _scale(real_skills[p]) for p in available_players}
 
     min_tier = min(tier_s.values())
     max_tier = max(tier_s.values())
 
     # Scale weights to integers
-    w_skill = int(weights["skill"])
-    w_power = int(weights["power"])
-    w_pairing = int(weights["pairing"])
+    w_skill = _scale(weights["skill"])
+    w_power = _scale(weights["power"])
+    w_pairing = _scale(weights["pairing"])
 
     # Pre-compute scaled pair powers (team average skill)
     player_pairs = list(combinations(sorted(available_players), 2))
@@ -405,7 +403,7 @@ def generate_one_round(
     power_obj = sum(max_team_pw[c] - min_team_pw[c] for c in range(num_courts))
 
     # Pairing: scale penalty to match rating domain
-    # RATING_SCALE / COURT_HISTORY_NORMALIZATION = 1000 / 4 = 250
+    # RATING_SCALE / COURT_HISTORY_NORMALIZATION = 100 / 4 = 25
     PAIRING_SCALE = RATING_SCALE // COURT_HISTORY_NORMALIZATION
 
     pairing_obj = sum(

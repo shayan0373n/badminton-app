@@ -11,6 +11,7 @@ import type {
   Session,
   SessionSummary,
   SubmitResult,
+  Weights,
 } from "./types";
 
 export class ApiError extends Error {
@@ -63,13 +64,12 @@ const json = (body: unknown): RequestInit => ({
 export const api = {
   listPlayers: () => request<{ players: RegistryPlayer[] }>("/players"),
 
-  savePlayers: (players: Pick<RegistryPlayer, "name" | "gender" | "prior_mu">[]) =>
-    request<{ saved: number }>("/players", { ...json({ players }), method: "PUT" }),
-
   recalculateRatings: () =>
     request<{ players: number; matches: number }>("/ratings/recalculate", { method: "POST" }),
 
-  listSessions: () => request<{ sessions: SessionSummary[] }>("/sessions"),
+  /** `unreadable` names sessions whose saved file could not be loaded. */
+  listSessions: () =>
+    request<{ sessions: SessionSummary[]; unreadable: string[] }>("/sessions"),
 
   createSession: (body: {
     name: string;
@@ -86,7 +86,7 @@ export const api = {
 
   updateSettings: (
     name: string,
-    body: { num_courts?: number; weights?: Record<string, number> },
+    body: { num_courts?: number; weights?: Partial<Weights> },
   ) =>
     request<Session>(`/sessions/${enc(name)}`, {
       ...json(body),
@@ -96,7 +96,7 @@ export const api = {
   resetMatchHistory: (name: string) =>
     request<Session>(`/sessions/${enc(name)}/match-history`, { method: "DELETE" }),
 
-  checkIn: (name: string, player: string, wantsChallenge = false) =>
+  checkIn: (name: string, player: string, wantsChallenge: boolean) =>
     request<Session>(
       `/sessions/${enc(name)}/checkin/${enc(player)}`,
       json({ wants_challenge: wantsChallenge }),

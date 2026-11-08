@@ -17,6 +17,9 @@ interface Props {
 
 export function SetupScreen({ onOpen }: Props) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  // Sessions whose saved file could not be read: shown so they can be deleted.
+  const [unreadable, setUnreadable] = useState<string[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [registry, setRegistry] = useState<RegistryPlayer[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
@@ -40,6 +43,7 @@ export function SetupScreen({ onOpen }: Props) {
     Promise.all([api.listSessions(), api.listPlayers()])
       .then(([s, p]) => {
         setSessions(s.sessions);
+        setUnreadable(s.unreadable);
         setRegistry(p.players);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load."))
@@ -49,13 +53,13 @@ export function SetupScreen({ onOpen }: Props) {
   // Shown as the placeholder and used verbatim on create, so the name the user
   // sees is the one that gets sent.
   const suggestedName = useMemo(() => {
-    const taken = new Set(sessions.map((s) => s.name));
+    const taken = new Set([...sessions.map((s) => s.name), ...unreadable]);
     const base = dateName();
     if (!taken.has(base)) return base;
     let n = 2;
     while (taken.has(`${base}-${n}`)) n += 1;
     return `${base}-${n}`;
-  }, [sessions]);
+  }, [sessions, unreadable]);
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -109,6 +113,18 @@ export function SetupScreen({ onOpen }: Props) {
     }
   }
 
+  async function discard(sessionName: string) {
+    setError(null);
+    try {
+      await api.deleteSession(sessionName);
+      setUnreadable((names) => names.filter((n) => n !== sessionName));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete that session.");
+    } finally {
+      setConfirmDelete(null);
+    }
+  }
+
   async function resume(sessionName: string) {
     setError(null);
     try {
@@ -145,6 +161,36 @@ export function SetupScreen({ onOpen }: Props) {
                 <button className="btn btn-primary" onClick={() => resume(s.name)}>
                   Resume
                 </button>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {unreadable.length > 0 && (
+          <section className="section">
+            <div className="section-head">
+              <h2>Unreadable sessions</h2>
+            </div>
+            {unreadable.map((sessionName) => (
+              <div className="session-card" key={sessionName}>
+                <div className="info">
+                  <div className="name">{sessionName}</div>
+                  <div className="meta">Its saved file could not be read.</div>
+                </div>
+                {confirmDelete === sessionName ? (
+                  <>
+                    <button className="btn btn-danger" onClick={() => discard(sessionName)}>
+                      Delete
+                    </button>
+                    <button className="btn" onClick={() => setConfirmDelete(null)}>
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <button className="btn" onClick={() => setConfirmDelete(sessionName)}>
+                    Delete…
+                  </button>
+                )}
               </div>
             ))}
           </section>

@@ -1,16 +1,7 @@
 import pytest
-import os
 from app_types import Gender, GenderStats
 from rating_service import compute_gender_statistics
 from session_logic import Player
-
-
-@pytest.fixture(params=["gurobi", "ortools"])
-def solver_backend(request, monkeypatch):
-    """Fixture that runs a test for each solver backend."""
-    import constants
-    monkeypatch.setattr(constants, "SOLVER_BACKEND", request.param)
-    return request.param
 
 
 @pytest.fixture
@@ -46,12 +37,6 @@ def sample_players():
 def sample_gender_stats(sample_players) -> GenderStats:
     """Returns gender statistics computed from sample_players."""
     return compute_gender_statistics(sample_players)
-
-
-@pytest.fixture
-def player_ratings(sample_players):
-    """Returns a mapping of player names to their ratings."""
-    return {name: p.prior_mu for name, p in sample_players.items()}
 
 
 @pytest.fixture

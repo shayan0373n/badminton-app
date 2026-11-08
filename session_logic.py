@@ -15,12 +15,12 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from constants import (
-    DEFAULT_IS_DOUBLES,
+    DEFAULT_WEIGHTS,
+    MAX_WEIGHT,
     PLAYERS_PER_COURT_DOUBLES,
     PLAYERS_PER_COURT_SINGLES,
     SESSION_PERFORMANCE_FACTOR,
     SOLVER_BACKEND,
-    TTT_DEFAULT_MU,
     TTT_DEFAULT_SIGMA,
 )
 from exceptions import SessionError
@@ -31,13 +31,11 @@ else:
     from optimizer import generate_one_round
 from rating_service import prepare_optimizer_ratings
 from app_types import (
-    DoublesMatch,
     Gender,
     GenderStats,
     MatchList,
     CourtHistory,
     PlayerName,
-    PlayerPair,
     RequiredPartners,
     RoundRecord,
 )
@@ -186,30 +184,37 @@ class SessionManager:
             session_name: Name of the session to load
 
         Returns:
-            The session object or None if not found/corrupted
+            The session object, or None if no file exists for that name.
+
+        Raises:
+            SessionError: If the file exists but cannot be read. The file is
+                left in place so it can be inspected or restored.
         """
         path = SessionManager._get_session_path(session_name)
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as f:
-                    session = pickle.load(f)
-                    logger.info("Session '%s' loaded", session_name)
-                    return session
-            except (pickle.UnpicklingError, EOFError):
-                logger.error(
-                    "Failed to load session '%s' - file may be corrupted", session_name
-                )
-                os.remove(path)
-                return None
-        return None
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "rb") as f:
+                session = pickle.load(f)
+        except Exception as e:
+            logger.exception("Failed to load session '%s' from %s", session_name, path)
+            raise SessionError(f"Session '{session_name}' could not be read") from e
+        logger.info("Session '%s' loaded", session_name)
+        return session
 
     @staticmethod
-    def clear(session_name: str) -> None:
-        """Clears a named session by deleting its file."""
+    def clear(session_name: str) -> bool:
+        """Deletes a named session's file, readable or not.
+
+        Returns:
+            True if a file was deleted, False if none existed.
+        """
         path = SessionManager._get_session_path(session_name)
-        if os.path.exists(path):
-            os.remove(path)
-            logger.info("Session '%s' cleared", session_name)
+        if not os.path.exists(path):
+            return False
+        os.remove(path)
+        logger.info("Session '%s' cleared", session_name)
+        return True
 
     @staticmethod
     def list_sessions() -> list[str]:
@@ -228,27 +233,36 @@ class ClubNightSession:
 
     def __init__(
         self,
-        players: dict[str, Player],
+        candidates: dict[PlayerName, Player],
         num_courts: int,
         gender_stats: GenderStats,
         weights: dict[str, float],
-        is_doubles: bool = True,
-        database_id: int | None = None,
-        is_recorded: bool = True,
-        teams: dict[PlayerName, str] | None = None,
-        candidates: dict[PlayerName, "Player"] | None = None,
+        is_doubles: bool,
+        is_recorded: bool,
+        database_id: int | None,
     ) -> None:
+        """Starts a session with tonight's candidates and nobody checked in.
+
+        Args:
+            candidates: Who might turn up tonight
+            num_courts: Courts available
+            gender_stats: Registry-wide gender statistics for tier ratings
+            weights: Optimizer weights; must name exactly skill, power, pairing
+            is_doubles: True for doubles, False for singles
+            is_recorded: Whether results count toward ratings
+            database_id: The session's database row, or None when not recorded
+        """
         # player_pool holds everyone currently checked in and eligible to play.
-        self.player_pool = players
+        # It starts empty: check_in is the only way in.
+        self.player_pool: dict[PlayerName, Player] = {}
         # candidates is the setup-time guest list: who might turn up tonight.
-        # Checking in copies a candidate into player_pool; checking out removes
+        # Checking in adds a candidate to player_pool (the same Player object,
+        # so pool players must not be mutated in place); checking out removes
         # them again. Nobody is ever removed from candidates by checking out.
-        self.candidates: dict[PlayerName, "Player"] = (
-            candidates if candidates is not None else dict(players)
-        )
+        self.candidates: dict[PlayerName, Player] = dict(candidates)
         # Session-scoped team memberships: player name -> comma-separated team
         # name(s). Teams exist only for the duration of a club night.
-        self.teams: dict[PlayerName, str] = teams or {}
+        self.teams: dict[PlayerName, str] = {}
         self.num_courts = num_courts
         self._gender_stats = gender_stats
         self.database_id = database_id
@@ -261,11 +275,16 @@ class ClubNightSession:
         # State required for the optimizer
         # CourtHistory values are (partner_count, opponent_count)
         self.court_history: CourtHistory = defaultdict(_default_court_history_value)
-        self.weights = weights
+        if set(weights) != set(DEFAULT_WEIGHTS):
+            raise SessionError(
+                f"Weights must name exactly {sorted(DEFAULT_WEIGHTS)}, got {sorted(weights)}"
+            )
+        self.weights: dict[str, float] = {}
+        self.update_weights(weights)
 
         # Session flow state
         self.round_history: list[RoundRecord] = []
-        self._rest_queue = RestRotationQueue(list(self.player_pool.keys()))
+        self._rest_queue = RestRotationQueue([])
         # Players who asked for a harder game. Session-scoped, like teams: a
         # challenge is a statement about tonight, not a property of the player.
         self.challengers: set[PlayerName] = set()
@@ -292,32 +311,15 @@ class ClubNightSession:
         return self.round_history[-1].resting_players
 
     def get_required_partners(self) -> RequiredPartners:
-        """Build graph of required partner relationships from team memberships.
+        """Returns each grouped player -> the players they must partner with.
 
-        Players can belong to multiple teams (comma-separated team names).
-        Each team creates pairwise "must partner with" relationships between members.
-
-        Returns:
-            Dict mapping each player to the set of players they must partner with
-            (when at least one is available).
+        A player in several groups may partner any one of them in a round.
         """
-        # Parse comma-separated team names into groups
-        team_groups: dict[str, list[PlayerName]] = defaultdict(list)
-        for player_name, team_names in self.teams.items():
-            if player_name not in self.player_pool:
-                continue
-            for team in team_names.split(","):
-                team = team.strip()
-                if team:
-                    team_groups[team].append(player_name)
-
-        # Build required partners graph from team memberships
         required: RequiredPartners = defaultdict(set)
-        for members in team_groups.values():
-            if len(members) >= 2:
-                for p1, p2 in combinations(members, 2):
-                    required[p1].add(p2)
-                    required[p2].add(p1)
+        for members in self.get_groups().values():
+            for p1, p2 in combinations(members, 2):
+                required[p1].add(p2)
+                required[p2].add(p1)
         return dict(required)
 
     # -------------------------------------------------------------------------
@@ -331,23 +333,16 @@ class ClubNightSession:
         so surfacing it would show a pairing that does not exist.
         """
         groups: dict[str, list[PlayerName]] = defaultdict(list)
-        for player_name, team_names in self.teams.items():
+        for player_name in self.teams:
             if player_name not in self.player_pool:
                 continue
-            for team in team_names.split(","):
-                team = team.strip()
-                if team:
-                    groups[team].append(player_name)
+            for team in self._memberships(player_name):
+                groups[team].append(player_name)
         return {name: members for name, members in groups.items() if len(members) > 1}
 
     def _next_group_name(self) -> str:
         """Returns an unused generated group name."""
-        existing = {
-            team.strip()
-            for names in self.teams.values()
-            for team in names.split(",")
-            if team.strip()
-        }
+        existing = {team for name in self.teams for team in self._memberships(name)}
         i = 1
         while f"G{i}" in existing:
             i += 1
@@ -356,13 +351,6 @@ class ClubNightSession:
     def _memberships(self, name: PlayerName) -> list[str]:
         """Returns the group names a player carries, in the order they joined."""
         return [team.strip() for team in self.teams.get(name, "").split(",") if team.strip()]
-
-    def group_of(self, name: PlayerName) -> str | None:
-        """Returns the first group a player belongs to, or None."""
-        for group_name, members in self.get_groups().items():
-            if name in members:
-                return group_name
-        return None
 
     def pair_players(self, first: PlayerName, second: PlayerName) -> str | None:
         """Pairs two players, leaving any pairs either already has intact.
@@ -393,7 +381,7 @@ class ClubNightSession:
 
     def unpair_player(self, name: PlayerName) -> bool:
         """Removes a player from every group they are in. Returns True if any."""
-        if self.group_of(name) is None:
+        if not any(name in members for members in self.get_groups().values()):
             return False
         self.teams.pop(name, None)
         return True
@@ -484,6 +472,25 @@ class ClubNightSession:
             raise SessionError("Number of courts must be at least 1.")
         self.num_courts = new_num_courts
 
+    def update_weights(self, weights: dict[str, float]) -> None:
+        """Changes some or all optimizer weights; applies on the next prepared round.
+
+        Raises:
+            SessionError: If a key is not a known weight or a value is outside
+                0..MAX_WEIGHT (this also rejects NaN and infinity).
+        """
+        unknown = set(weights) - set(DEFAULT_WEIGHTS)
+        if unknown:
+            raise SessionError(f"Unknown weight(s): {', '.join(sorted(unknown))}")
+        out_of_range = [
+            key for key, value in weights.items() if not 0 <= value <= MAX_WEIGHT
+        ]
+        if out_of_range:
+            raise SessionError(
+                f"Weights must be between 0 and {MAX_WEIGHT}: {', '.join(sorted(out_of_range))}"
+            )
+        self.weights = {**self.weights, **weights}
+
     def reset_court_history(self) -> None:
         """Forgets who has partnered or faced whom; applies on the next prepared round.
 
@@ -492,19 +499,29 @@ class ClubNightSession:
         self.court_history = defaultdict(_default_court_history_value)
 
     def set_court_result(
-        self, round_idx: int, court_num: int, winner: tuple[str, ...] | None
+        self, round_idx: int, court_num: int, winning_side: int | None
     ) -> None:
         """Sets or clears a single court result in round history.
 
         Args:
             round_idx: Index into round_history (0-based)
             court_num: Court number (1-indexed)
-            winner: Winning team tuple, or None to clear
+            winning_side: 1 or 2, or None to clear
+
+        Raises:
+            SessionError: If the round, court or side does not exist.
         """
         if round_idx < 0 or round_idx >= len(self.round_history):
-            raise SessionError(f"Invalid round index: {round_idx}")
+            raise SessionError(f"No round at index {round_idx}")
+        if winning_side not in (None, 1, 2):
+            raise SessionError(f"Winning side must be 1, 2 or None, not {winning_side}")
 
         record = self.round_history[round_idx]
+        match = next((m for m in record.matches if m.court == court_num), None)
+        if match is None:
+            raise SessionError(f"No court {court_num} in the round at index {round_idx}")
+
+        winner = None if winning_side is None else match.sides[winning_side - 1]
         previous_winner = record.winners_by_court.get(court_num)
         if winner is None:
             record.winners_by_court.pop(court_num, None)
@@ -513,13 +530,6 @@ class ClubNightSession:
 
         if previous_winner != winner:
             self.results_dirty = True
-
-    @staticmethod
-    def _match_player_names(match) -> set[PlayerName]:
-        """Returns the set of players in a single match (singles or doubles)."""
-        if isinstance(match, DoublesMatch):
-            return set(match.team_1) | set(match.team_2)
-        return {match.player_1, match.player_2}
 
     def _compute_session_stats(self) -> dict[PlayerName, tuple[int, int]]:
         """Walks round_history once and returns {name: (matches, wins)} for everyone who has been on a court.
@@ -532,23 +542,16 @@ class ClubNightSession:
         stats: dict[PlayerName, tuple[int, int]] = {}
         for record in self.round_history:
             for match in record.matches:
-                for name in self._match_player_names(match):
+                on_court = [name for side in match.sides for name in side]
+                for name in on_court:
                     stats.setdefault(name, (0, 0))
                 if match.court not in record.winners_by_court:
                     continue
                 winners = set(record.winners_by_court[match.court])
-                for name in self._match_player_names(match):
+                for name in on_court:
                     m, w = stats[name]
                     stats[name] = (m + 1, w + (1 if name in winners else 0))
         return stats
-
-    def wins(self, name: PlayerName) -> int:
-        """Returns the number of matches this player has won so far this session."""
-        return self._compute_session_stats().get(name, (0, 0))[1]
-
-    def matches_played(self, name: PlayerName) -> int:
-        """Returns the number of matches this player has played so far this session."""
-        return self._compute_session_stats().get(name, (0, 0))[0]
 
     def get_standings(self) -> list[tuple[str, int, int, float]]:
         """Returns standings as (name, matches, wins, ratio) sorted by ratio desc then wins desc.
@@ -562,67 +565,37 @@ class ClubNightSession:
         ]
         return sorted(rows, key=lambda r: (r[3], r[2]), reverse=True)
 
-    def get_persistent_state(self) -> dict:
-        """Returns session parameters to preserve across session termination.
+    # -------------------------------------------------------------------------
+    # Roster: candidates are tonight's guest list, the pool is who is checked in
+    # -------------------------------------------------------------------------
 
-        This allows the next session to start with the same configuration.
-        """
-        return {
-            "player_pool": self.player_pool,
-            "num_courts": self.num_courts,
-            "is_doubles": self.is_doubles,
-            "is_recorded": self.is_recorded,
-            "weights": self.weights.copy(),
-            "gender_stats": self._gender_stats,
-        }
-
-    def add_player(
-        self,
-        name: str,
-        gender: Gender,
-        prior_mu: float = TTT_DEFAULT_MU,
-        prior_sigma: float = TTT_DEFAULT_SIGMA,
-        mu: float | None = None,
-        sigma: float | None = None,
-        team_name: str = "",
-    ) -> bool:
-        """Adds a new player mid-session at the back of the rest queue.
-
-        Args:
-            name: Player's name (must be unique)
-            gender: Gender.MALE ('M') or Gender.FEMALE ('F')
-            prior_mu: TTT prior mean (manual skill estimate, input to rating recalc)
-            prior_sigma: TTT prior uncertainty (standard deviation)
-            mu: TTT posterior mean; defaults to prior_mu when None
-            sigma: TTT posterior uncertainty; defaults to prior_sigma when None
-            team_name: Optional comma-separated team name(s) for fixed pairing
+    def add_candidate(self, player: Player) -> bool:
+        """Adds someone to tonight's list without checking them in.
 
         Returns:
-            True if added successfully, False if name already exists.
+            True if added, False if a candidate by that name already exists.
         """
-        if name in self.player_pool:
+        if player.name in self.candidates:
             return False
+        self.candidates[player.name] = player
+        return True
 
-        player = Player(
-            name=name,
-            gender=gender,
-            prior_mu=prior_mu,
-            prior_sigma=prior_sigma,
-            mu=mu,
-            sigma=sigma,
-        )
-        self.player_pool[name] = player
-        self.candidates.setdefault(name, player)
-        if team_name:
-            self.teams[name] = team_name
-        self._rest_queue.add_player(name)
+    def remove_candidate(self, name: PlayerName) -> bool:
+        """Drops someone from tonight's list, checking them out first.
+
+        Returns:
+            True if removed, False if they were not on the list.
+        """
+        if name not in self.candidates:
+            return False
+        self.check_out(name)
+        del self.candidates[name]
         return True
 
     def check_in(self, name: PlayerName, wants_challenge: bool = False) -> bool:
-        """Moves a candidate into the playing pool.
+        """Adds a candidate to the playing pool, at the back of the rest queue.
 
-        Checking in *is* joining the pool, so this reuses add_player and the
-        rest rotation needs no notion of presence beyond who is in the pool.
+        They stay on the candidate list.
 
         Args:
             name: A name from `candidates`
@@ -631,35 +604,32 @@ class ClubNightSession:
         Returns:
             True if they were checked in, False if unknown or already in.
         """
-        if name in self.player_pool:
+        if name in self.player_pool or name not in self.candidates:
             return False
 
-        candidate = self.candidates.get(name)
-        if candidate is None:
-            return False
-
-        added = self.add_player(
-            name=candidate.name,
-            gender=candidate.gender,
-            prior_mu=candidate.prior_mu,
-            prior_sigma=candidate.prior_sigma,
-            mu=candidate.mu,
-            sigma=candidate.sigma,
-        )
-        if added and wants_challenge:
-            self.set_challenge(name, True)
-        return added
+        self.player_pool[name] = self.candidates[name]
+        self._rest_queue.add_player(name)
+        if wants_challenge:
+            self.challengers.add(name)
+        return True
 
     def check_out(self, name: PlayerName) -> bool:
-        """Removes a player from the pool, keeping them on the candidate list.
+        """Removes a player from the pool, their pairings, and the rest rotation.
 
-        Takes effect at once, whether or not they are on a court in the current
-        round: that round's matches keep their names, so its results still count.
+        They stay on the candidate list. Takes effect at once, whether or not
+        they are on a court in the current round: that round's matches keep
+        their names, so its results still count.
 
         Returns:
             True if they were checked out, False if they were not checked in.
         """
-        return self.remove_player(name)
+        if name not in self.player_pool:
+            return False
+        del self.player_pool[name]
+        self.teams.pop(name, None)
+        self.challengers.discard(name)
+        self._rest_queue.remove_player(name)
+        return True
 
     def set_challenge(self, name: PlayerName, wants_challenge: bool) -> bool:
         """Flags or clears a player's request for a harder game.
@@ -680,23 +650,4 @@ class ClubNightSession:
             self.challengers.add(name)
         else:
             self.challengers.discard(name)
-        return True
-
-    def toggle_challenge(self, name: PlayerName) -> bool:
-        """Flips a player's challenge flag. Returns the resulting state."""
-        self.set_challenge(name, name not in self.challengers)
-        return name in self.challengers
-
-    def remove_player(self, name: str) -> bool:
-        """Removes a player from the pool, their pairings, and the rest rotation.
-
-        Returns:
-            True if they were removed, False if they were not in the pool.
-        """
-        if name not in self.player_pool:
-            return False
-        del self.player_pool[name]
-        self.teams.pop(name, None)
-        self.challengers.discard(name)
-        self._rest_queue.remove_player(name)
         return True

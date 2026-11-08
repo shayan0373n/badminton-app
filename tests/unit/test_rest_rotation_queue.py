@@ -1,4 +1,3 @@
-import pytest
 from collections import Counter
 
 from session_logic import RestRotationQueue

@@ -23,15 +23,3 @@ class SessionError(BadmintonAppError):
     """Raised when a session operation fails."""
 
     pass
-
-
-class OptimizerError(BadmintonAppError):
-    """Raised when the optimizer fails to find a solution."""
-
-    pass
-
-
-class ValidationError(BadmintonAppError):
-    """Raised when input validation fails."""
-
-    pass

@@ -185,37 +185,6 @@ class SessionDB:
         )
 
     @staticmethod
-    def get_session_by_name(session_name: str) -> dict | None:
-        """Retrieves a session by name.
-
-        Args:
-            session_name: Name of the session to retrieve
-
-        Returns:
-            Session dict or None if not found
-
-        Raises:
-            DatabaseError: If the query fails.
-        """
-        try:
-            supabase = get_supabase_client()
-            response = (
-                supabase.table("sessions")
-                .select("*")
-                .eq("name", session_name)
-                .execute()
-            )
-        except Exception as e:
-            logger.exception(
-                f"Supabase API call failed: get_session_by_name '{session_name}'"
-            )
-            raise DatabaseError(f"Failed to retrieve session '{session_name}'") from e
-
-        if response.data:
-            return response.data[0]
-        return None
-
-    @staticmethod
     def get_all_sessions() -> list[dict]:
         """Fetches all sessions from the database.
 

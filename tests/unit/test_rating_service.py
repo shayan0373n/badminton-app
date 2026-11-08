@@ -7,13 +7,12 @@ Decoupled Organic Inputs architecture.
 """
 
 import pytest
-from statistics import mean, stdev
+from statistics import stdev
 
 from app_types import Gender
 from constants import (
     FALLBACK_GENDER_MEAN,
     FALLBACK_GENDER_STD,
-    MIN_PLAYERS_FOR_GENDER_STATS,
     OPTIMIZER_SKILL_RANGE,
     TTT_MU_BAD,
     TTT_MU_GOOD,

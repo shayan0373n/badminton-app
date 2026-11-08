@@ -15,9 +15,9 @@ import logging
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, status
+from fastapi import FastAPI, HTTPException, Path, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,14 +27,13 @@ from logger import setup_logging
 
 setup_logging(app_level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
-import player_service
 import season_service
 import session_service
 from app_types import Gender
-from constants import DEFAULT_NUM_COURTS, DEFAULT_WEIGHTS, TTT_DEFAULT_MU
+from constants import DEFAULT_WEIGHTS, MAX_WEIGHT
 from database import PlayerDB
 from exceptions import DatabaseError, SessionError
-from session_logic import ClubNightSession, Player, SessionManager
+from session_logic import ClubNightSession, SessionManager
 
 logger = logging.getLogger("app.api")
 
@@ -71,22 +70,40 @@ async def run_blocking(func, /, *args, **kwargs):
 # =============================================================================
 
 
+# A session name becomes a file name under sessions/, so it may not contain a
+# path separator or start with a dot.
+SESSION_NAME_PATTERN = r"^[^/\\.][^/\\]*$"
+
+
+class Weights(BaseModel, extra="forbid"):
+    skill: float = Field(ge=0, le=MAX_WEIGHT)
+    power: float = Field(ge=0, le=MAX_WEIGHT)
+    pairing: float = Field(ge=0, le=MAX_WEIGHT)
+
+
+class WeightChanges(BaseModel, extra="forbid"):
+    skill: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
+    power: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
+    pairing: float | None = Field(default=None, ge=0, le=MAX_WEIGHT)
+
+
 class CreateSessionRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=80, pattern=SESSION_NAME_PATTERN)
     candidates: list[str] = Field(min_length=1)
-    num_courts: int = Field(default=DEFAULT_NUM_COURTS, ge=1, le=20)
-    is_doubles: bool = True
-    is_recorded: bool = True
-    weights: dict[str, float] | None = None
+    num_courts: int = Field(ge=1, le=20)
+    is_doubles: bool
+    is_recorded: bool
+    # Omitted means DEFAULT_WEIGHTS; when given, all three must be named.
+    weights: Weights | None = None
 
 
 class SessionSettingsRequest(BaseModel):
     num_courts: int | None = Field(default=None, ge=1, le=20)
-    weights: dict[str, float] | None = None
+    weights: WeightChanges | None = None
 
 
 class CheckInRequest(BaseModel):
-    wants_challenge: bool = False
+    wants_challenge: bool
 
 
 class ChallengeRequest(BaseModel):
@@ -99,23 +116,13 @@ class PairRequest(BaseModel):
 
 
 class WinnerRequest(BaseModel):
-    winner: int | None = Field(default=None, description="1, 2, or null to clear")
+    winner: Literal[1, 2] | None = Field(description="1, 2, or null to clear")
 
 
 class GuestRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
-    gender: Gender = Gender.MALE
-    mu: float = Field(default=TTT_DEFAULT_MU, ge=0.0, le=60.0)
-
-
-class RegistryPlayer(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
     gender: Gender
-    prior_mu: float = Field(default=TTT_DEFAULT_MU, ge=0.0, le=60.0)
-
-
-class RegistryRequest(BaseModel):
-    players: list[RegistryPlayer]
+    mu: float = Field(ge=0.0, le=60.0)
 
 
 # =============================================================================
@@ -137,8 +144,13 @@ app.add_middleware(
 
 
 def load_session(name: str) -> ClubNightSession:
-    """Loads a session by name or raises 404."""
-    session = SessionManager.load(name)
+    """Loads a session by name; 404 if there is none, 500 if its file is unreadable."""
+    try:
+        session = SessionManager.load(name)
+    except SessionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
     if session is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"No session named '{name}'"
@@ -146,7 +158,7 @@ def load_session(name: str) -> ClubNightSession:
     return session
 
 
-SessionName = Annotated[str, Path(min_length=1, max_length=80)]
+SessionName = Annotated[str, Path(min_length=1, max_length=80, pattern=SESSION_NAME_PATTERN)]
 
 
 # =============================================================================
@@ -180,30 +192,6 @@ async def list_players() -> dict[str, Any]:
     }
 
 
-@app.put("/api/players")
-async def save_players(payload: RegistryRequest) -> dict[str, Any]:
-    """Applies registry edits: adds, renames by name, and prior_mu changes."""
-    try:
-        old = await run_blocking(PlayerDB.get_all_players)
-        new: dict[str, Player] = {}
-        for entry in payload.players:
-            existing = old.get(entry.name)
-            new[entry.name] = Player(
-                name=entry.name,
-                gender=entry.gender,
-                prior_mu=entry.prior_mu,
-                prior_sigma=existing.prior_sigma if existing else Player(name="", gender=entry.gender).prior_sigma,
-                mu=existing.mu if existing else None,
-                sigma=existing.sigma if existing else None,
-                database_id=existing.database_id if existing else None,
-            )
-        await run_blocking(player_service.sync_registry_to_database, old, new)
-    except DatabaseError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
-
-    return {"saved": len(payload.players)}
-
-
 @app.post("/api/ratings/recalculate")
 async def recalculate_ratings() -> dict[str, Any]:
     """Rebuilds this season's ratings from match history and writes them back."""
@@ -224,10 +212,19 @@ async def recalculate_ratings() -> dict[str, Any]:
 
 @app.get("/api/sessions")
 async def list_sessions() -> dict[str, Any]:
-    """Returns resumable sessions with just enough detail to pick one."""
+    """Returns resumable sessions with just enough detail to pick one.
+
+    Sessions whose file cannot be read are listed by name under "unreadable",
+    so they can be seen and deleted, and their names are not reused.
+    """
     summaries = []
+    unreadable = []
     for name in SessionManager.list_sessions():
-        session = SessionManager.load(name)
+        try:
+            session = SessionManager.load(name)
+        except SessionError:
+            unreadable.append(name)
+            continue
         if session is None:
             continue
         summaries.append(
@@ -240,7 +237,10 @@ async def list_sessions() -> dict[str, Any]:
                 "is_recorded": session.is_recorded,
             }
         )
-    return {"sessions": sorted(summaries, key=lambda s: s["name"])}
+    return {
+        "sessions": sorted(summaries, key=lambda s: s["name"]),
+        "unreadable": sorted(unreadable),
+    }
 
 
 @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
@@ -269,14 +269,12 @@ async def create_session(payload: CreateSessionRequest) -> dict[str, Any]:
     try:
         session = await run_blocking(
             session_service.create_new_session,
-            player_table={},
-            num_courts=payload.num_courts,
-            weights=payload.weights or dict(DEFAULT_WEIGHTS),
             session_name=payload.name,
+            candidates=candidates,
+            num_courts=payload.num_courts,
+            weights=payload.weights.model_dump() if payload.weights else dict(DEFAULT_WEIGHTS),
             is_doubles=payload.is_doubles,
             is_recorded=payload.is_recorded,
-            candidates=candidates,
-            prepare_first_round=False,
         )
     except DatabaseError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
@@ -293,10 +291,15 @@ async def get_session(name: SessionName) -> dict[str, Any]:
 
 @app.delete("/api/sessions/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(name: SessionName) -> None:
-    """Discards a session. Submitted results already in the database survive."""
-    load_session(name)
+    """Discards a session, even one whose file cannot be read.
+
+    Submitted results already in the database survive.
+    """
     async with session_lock(name):
-        SessionManager.clear(name)
+        if not SessionManager.clear(name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"No session named '{name}'"
+            )
 
 
 @app.patch("/api/sessions/{name}")
@@ -306,16 +309,15 @@ async def update_settings(
     """Changes courts or weights. Both take effect from the next round."""
     async with session_lock(name):
         session = load_session(name)
-        if payload.num_courts is not None:
-            try:
-                session_service.update_court_count(session, name, payload.num_courts)
-            except SessionError as e:
-                raise HTTPException(status_code=400, detail=str(e)) from e
-        if payload.weights is not None:
-            merged = {**session.weights, **payload.weights}
-            session_service.update_weights(
-                session, name, merged["skill"], merged["power"], merged["pairing"]
+        try:
+            weights = (
+                payload.weights.model_dump(exclude_none=True) if payload.weights else None
             )
+            session_service.update_settings(
+                session, name, num_courts=payload.num_courts, weights=weights
+            )
+        except SessionError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         return session_service.build_session_snapshot(session, name)
 
 
@@ -335,7 +337,7 @@ async def reset_match_history(name: SessionName) -> dict[str, Any]:
 
 @app.post("/api/sessions/{name}/checkin/{player}")
 async def check_in(
-    name: SessionName, player: str, payload: CheckInRequest = Body(default=CheckInRequest())
+    name: SessionName, player: str, payload: CheckInRequest
 ) -> dict[str, Any]:
     """Checks a candidate in, optionally flagging them as wanting a harder game."""
     async with session_lock(name):
@@ -412,16 +414,19 @@ async def add_guest(name: SessionName, payload: GuestRequest) -> dict[str, Any]:
     """Creates a guest, saves them to the registry, and checks them in."""
     async with session_lock(name):
         session = load_session(name)
-        success, error = await run_blocking(
-            session_service.add_guest_player,
-            session,
-            payload.name,
-            payload.gender,
-            payload.mu,
-        )
+        try:
+            success, error = await run_blocking(
+                session_service.add_guest_player,
+                session,
+                name,
+                payload.name,
+                payload.gender,
+                payload.mu,
+            )
+        except DatabaseError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
         if not success:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=error)
-        SessionManager.save(session, name)
         return session_service.build_session_snapshot(session, name)
 
 
@@ -443,8 +448,7 @@ async def add_candidate(name: SessionName, player: str) -> dict[str, Any]:
         if player not in registry:
             raise HTTPException(status_code=404, detail=f"{player} is not in the registry")
 
-        session.candidates[player] = registry[player]
-        SessionManager.save(session, name)
+        session_service.add_candidate(session, name, registry[player])
         return session_service.build_session_snapshot(session, name)
 
 
@@ -453,11 +457,8 @@ async def remove_candidate(name: SessionName, player: str) -> dict[str, Any]:
     """Drops someone from tonight's list entirely, checking them out first."""
     async with session_lock(name):
         session = load_session(name)
-        if player not in session.candidates:
+        if not session_service.remove_candidate(session, name, player):
             raise HTTPException(status_code=404, detail=f"{player} is not on tonight's list")
-        session_service.check_out_player(session, name, player)
-        session.candidates.pop(player, None)
-        SessionManager.save(session, name)
         return session_service.build_session_snapshot(session, name)
 
 
@@ -476,7 +477,7 @@ async def next_round(name: SessionName) -> dict[str, Any]:
     async with session_lock(name):
         session = load_session(name)
 
-        if len(session.player_pool) < (4 if session.is_doubles else 2):
+        if len(session.player_pool) < session.players_per_court:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Not enough players checked in to fill a court",
@@ -498,26 +499,14 @@ async def set_winner(
     name: SessionName, round_index: int, court: int, payload: WinnerRequest
 ) -> dict[str, Any]:
     """Records or clears the winning side of one court."""
-    if payload.winner not in (None, 1, 2):
-        raise HTTPException(status_code=400, detail="winner must be 1, 2, or null")
-
     async with session_lock(name):
         session = load_session(name)
-        if not 0 <= round_index < len(session.round_history):
-            raise HTTPException(status_code=404, detail=f"No round at index {round_index}")
-
-        record = session.round_history[round_index]
-        match = next((m for m in record.matches if m.court == court), None)
-        if match is None:
-            raise HTTPException(status_code=404, detail=f"No court {court} in that round")
-
-        if payload.winner is None:
-            winner = None
-        else:
-            side_1, side_2 = session_service._match_sides(match)
-            winner = tuple(side_1 if payload.winner == 1 else side_2)
-
-        session_service.save_court_result(session, name, round_index, court, winner)
+        try:
+            session_service.save_court_result(
+                session, name, round_index, court, payload.winner
+            )
+        except SessionError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
         return session_service.build_session_snapshot(session, name)
 
 

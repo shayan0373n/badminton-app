@@ -63,7 +63,7 @@ Conservative rating for display: `mu - 3×sigma`
 
 ## Notes
 
-- Library: `trueskillthroughtime` v2.0.0 (cloned from GitHub)
+- Library: TrueSkillThroughTime v2.0.0, vendored in `vendor/trueskillthroughtime/`
 - Time unit: Days
 - Observation model: Ordinal (win/loss only, no scores)
 - Spread of 14 points between skill levels calibrated for ~99% singles win rate (good vs bad)

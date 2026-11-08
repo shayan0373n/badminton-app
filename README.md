@@ -7,7 +7,7 @@ for a harder game.
 
 ## Features
 
-- **Smart Match Optimization**: Uses Gurobi to solve a multi-objective integer linear program (ILP) that minimizes a weighted combination of:
+- **Smart Match Optimization**: Uses OR-Tools CP-SAT by default (Gurobi optional) to solve a multi-objective integer program that minimizes a weighted combination of:
   - *Skill spread* — difference between the strongest and weakest player on each court (uses tier ratings)
   - *Team power imbalance* — difference in combined ratings between opposing teams (uses real skills)
   - *Court repetition* — penalizes players who frequently share a court to encourage variety
@@ -118,7 +118,7 @@ suites first and checks `/api/health` afterwards. It needs the repo secrets
 ```
 ├── api.py               # HTTP API over the service layer
 ├── frontend/            # React client (setup, check-in hub, session)
-├── config.py            # Secrets from env, falling back to secrets.toml
+├── config.py            # Secrets from env, falling back to .env
 ├── compose.yaml         # Service definition, included by the host compose project
 ├── session_logic.py     # Core session and player logic
 ├── optimizer.py         # Match generation optimization

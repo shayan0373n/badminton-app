@@ -1,5 +1,4 @@
-import pytest
-from app_types import Gender, OptimizerResult
+from app_types import Gender
 from constants import DEFAULT_WEIGHTS, SOLVER_BACKEND
 if SOLVER_BACKEND == "ortools":
     from optimizer_ortools import generate_one_round

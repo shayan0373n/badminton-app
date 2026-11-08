@@ -2,8 +2,8 @@
  * The check-in hub.
  *
  * This is the screen the night runs from: players tap themselves in, long press
- * to ask for a harder game, and drag onto each other to pair up. Everything the
- * old sidebar held lives in the side menu here, and Start goes to the courts.
+ * to ask for a harder game, and drag onto each other to pair up. Management
+ * actions live in the side menu here, and Start goes to the courts.
  * You come back between rounds to change things.
  */
 
@@ -51,7 +51,7 @@ export function CheckInScreen({ session, error, busy, run, onStart, onExit }: Pr
 
   function toggleCheckIn(playerName: string, isIn: boolean) {
     run(
-      () => (isIn ? api.checkOut(name, playerName) : api.checkIn(name, playerName)),
+      () => (isIn ? api.checkOut(name, playerName) : api.checkIn(name, playerName, false)),
       {
         optimistic: (s) =>
           withCandidate(s, playerName, {

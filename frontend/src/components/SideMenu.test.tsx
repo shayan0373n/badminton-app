@@ -1,14 +1,19 @@
 /**
- * Upload-results behaviour in the session drawer, with the API stubbed.
+ * Side menu behaviour, with the API stubbed.
+ *
+ * Covers the guest form's skill field (an empty or out-of-range entry must
+ * block the request rather than be sent as some other number), the weights
+ * shown, and the upload-results button's progress and outcome.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SideMenu } from "./SideMenu";
 import type { Session } from "../types";
 
 vi.mock("../api", () => ({
   api: {
+    addGuest: vi.fn(),
     submit: vi.fn(),
     getSession: vi.fn(),
     listPlayers: vi.fn().mockResolvedValue({ players: [] }),
@@ -30,13 +35,13 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     name: "Night",
     is_doubles: true,
     is_recorded: true,
-    num_courts: 1,
-    weights: { skill: 1, power: 1, pairing: 1 },
-    round_num: 1,
-    results_dirty: true,
+    num_courts: 2,
+    weights: { skill: 1, power: 1.5, pairing: 1 },
+    round_num: 0,
+    results_dirty: false,
     candidates: [],
     groups: [],
-    rounds: [playedRound],
+    rounds: [],
     standings: [],
     ...overrides,
   };
@@ -57,18 +62,75 @@ function renderMenu(session = makeSession()) {
   return { run };
 }
 
+/** Renders the drawer with a guest name typed in and returns the guest form's controls. */
+function renderGuestForm() {
+  renderMenu();
+  fireEvent.change(screen.getByLabelText("Guest name"), { target: { value: "Zoe" } });
+  return {
+    skill: screen.getByLabelText("Starting skill"),
+    add: screen.getByRole("button", { name: "Add and check in" }),
+  };
+}
+
+describe("SideMenu guest form", () => {
+  beforeEach(() => {
+    vi.mocked(api.addGuest).mockReset().mockResolvedValue(makeSession());
+  });
+
+  it("blocks adding a guest with an empty skill instead of sending 0", () => {
+    const { skill, add } = renderGuestForm();
+
+    fireEvent.change(skill, { target: { value: "" } });
+
+    expect(add).toBeDisabled();
+    expect(screen.getByText("Enter a skill from 0 to 60.")).toBeInTheDocument();
+    fireEvent.click(add);
+    expect(api.addGuest).not.toHaveBeenCalled();
+  });
+
+  it("blocks a skill outside the range the server accepts", () => {
+    const { skill, add } = renderGuestForm();
+
+    fireEvent.change(skill, { target: { value: "61" } });
+
+    expect(add).toBeDisabled();
+  });
+
+  it("sends the entered skill as a number", async () => {
+    const { skill, add } = renderGuestForm();
+
+    fireEvent.change(skill, { target: { value: "30" } });
+    fireEvent.click(add);
+
+    await waitFor(() =>
+      expect(api.addGuest).toHaveBeenCalledWith("Night", { name: "Zoe", gender: "M", mu: 30 }),
+    );
+  });
+});
+
+describe("SideMenu weights", () => {
+  it("shows the session's own weights", () => {
+    renderMenu();
+
+    expect(screen.getByText("1.5")).toBeInTheDocument();
+  });
+});
+
 describe("SideMenu upload", () => {
+  const played = (overrides: Partial<Session> = {}) =>
+    makeSession({ round_num: 1, rounds: [playedRound], results_dirty: true, ...overrides });
+
   beforeEach(() => vi.clearAllMocks());
 
   it("shows Uploading… while the request is in flight", async () => {
     let resolve!: (v: unknown) => void;
     vi.mocked(api.submit).mockReturnValue(new Promise((r) => (resolve = r)) as never);
-    renderMenu();
+    renderMenu(played());
 
     fireEvent.click(screen.getByRole("button", { name: "Upload results" }));
     expect(await screen.findByRole("button", { name: "Uploading…" })).toBeInTheDocument();
 
-    resolve({ recorded: 1, unreported: 0, session: makeSession({ results_dirty: false }) });
+    resolve({ recorded: 1, unreported: 0, session: played({ results_dirty: false }) });
     expect(await screen.findByRole("button", { name: "Upload results" })).toBeInTheDocument();
   });
 
@@ -76,9 +138,9 @@ describe("SideMenu upload", () => {
     vi.mocked(api.submit).mockResolvedValue({
       recorded: 3,
       unreported: 1,
-      session: makeSession({ results_dirty: false }),
+      session: played({ results_dirty: false }),
     });
-    const { run } = renderMenu();
+    const { run } = renderMenu(played());
 
     fireEvent.click(screen.getByRole("button", { name: "Upload results" }));
 
@@ -89,7 +151,7 @@ describe("SideMenu upload", () => {
 
   it("shows the failure beside the button", async () => {
     vi.mocked(api.submit).mockRejectedValue(new Error("Database unreachable"));
-    renderMenu();
+    renderMenu(played());
 
     fireEvent.click(screen.getByRole("button", { name: "Upload results" }));
 
@@ -98,12 +160,12 @@ describe("SideMenu upload", () => {
   });
 
   it("shows Uploaded ✓ when reported results are already uploaded", () => {
-    renderMenu(makeSession({ results_dirty: false }));
+    renderMenu(played({ results_dirty: false }));
     expect(screen.getByText("Uploaded ✓")).toBeInTheDocument();
   });
 
   it("says nothing about upload state before any result is reported", () => {
-    renderMenu(makeSession({ results_dirty: false, rounds: [] }));
+    renderMenu();
     expect(screen.queryByText("Uploaded ✓")).not.toBeInTheDocument();
     expect(screen.queryByText("Not uploaded yet.")).not.toBeInTheDocument();
   });
